@@ -1,0 +1,80 @@
+/* Keep the complete design problem beside the spectrum, without duplicate inputs. */
+.studio{display:grid;grid-template-columns:280px minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+.parameter-panel{grid-column:1;grid-row:1/-1;padding:16px 16px 12px;min-height:0;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#c6d2e3 transparent}
+.studio>.run-bar{grid-column:2;grid-row:1}.studio>.dashboard{grid-column:2;grid-row:2}
+.parameter-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.parameter-heading h2{font-size:20px;letter-spacing:-.4px}.parameter-heading>span{font-size:13px;color:#8190a4}
+.parameter-panel form{display:block}.parameter-panel fieldset{margin:0 0 8px;padding:0}
+.parameter-panel legend{font-size:14px;font-weight:650;letter-spacing:.1px;color:#405b7d;padding-top:8px;margin-bottom:6px;border-top:1px solid #e6ebf2}
+.parameter-panel fieldset:first-child legend{padding-top:0;border:0}
+.parameter-panel label{font-size:14px;font-weight:500;line-height:1.25;margin:0;color:#425873}
+.parameter-panel input,.parameter-panel select{height:35px;padding:6px 8px;font-size:15px;line-height:1.2;margin:0;border-radius:6px;min-width:0;background:#fcfdff}
+.parameter-row{display:grid;grid-template-columns:minmax(0,1fr) 103px;align-items:center;gap:9px;min-height:35px}
+.parameter-row+.parameter-row{margin-top:5px}.material-fields .parameter-row{grid-template-columns:minmax(0,1fr) 145px;gap:7px}
+.parameter-pair{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px}
+.parameter-pair input{margin-top:5px}.parameter-panel .parameter-label{font:inherit;color:inherit;margin:0}
+.parameter-label small{display:block;color:#72839b;font-size:12px;line-height:1.3;margin-top:2px;font-weight:400}
+.parameter-panel .advanced-parameters{border-top:1px solid #e6ebf2;padding-top:8px}
+.parameter-panel .advanced-parameters summary{font-size:14px;margin:0;color:#526b8e;line-height:1.5}
+.parameter-panel .advanced-parameters[open] summary{margin-bottom:10px}
+.parameter-error{font-size:14px;line-height:1.4;margin:12px 0 0;padding:10px;background:#fff1ef;border:1px solid #edc7c1;border-radius:7px;color:#9a3d32}
+.range-summary{font-size:15px;color:#536b88;white-space:nowrap;font-weight:550}
+.studio>.dashboard{grid-template-columns:minmax(0,1fr) 290px}
+.run-status-line{flex-wrap:wrap;gap:4px 12px}.run-status-line .stage-track{margin-left:auto}
+.stage-track i{display:none}.stage-track>span{font-size:12px;padding:3px 4px}
+.spectrum-controls{gap:8px}.preset-tabs button{padding:6px 8px;font-size:13px}
+.spectrum-panel h1{font-size:23px}.spectrum-panel .chart-unit{display:none}
+.spectrum-panel .legend{gap:16px;font-size:15px}
+.insertion-focus{min-width:180px;width:34%;padding-left:12px}.stack-container{gap:12px}
+.metrics strong{font-size:24px}.telemetry-panel .metrics{gap:10px 12px}.metrics small{font-size:11px}
+.presenting .parameter-panel{display:none}.presenting .studio{grid-template-columns:minmax(0,1fr)}
+.presenting .studio>.run-bar,.presenting .studio>.dashboard{grid-column:1}
+.presenting .studio>.dashboard{grid-template-columns:minmax(0,1fr) 330px}
+@media(min-width:1600px){
+  .studio{grid-template-columns:300px minmax(0,1fr)}.studio>.dashboard{grid-template-columns:minmax(0,1fr) 330px}
+  .parameter-panel{padding:18px}.parameter-heading h2{font-size:22px}.parameter-panel legend{font-size:16px}
+  .parameter-panel label{font-size:15px}.parameter-panel input,.parameter-panel select{height:38px;font-size:16px}
+  .parameter-panel fieldset{margin-bottom:16px}.parameter-row{grid-template-columns:minmax(0,1fr) 112px}
+  .material-fields .parameter-row{grid-template-columns:minmax(0,1fr) 155px}
+  .spectrum-panel h1{font-size:27px}.spectrum-panel .legend{font-size:16px}
+  .metrics strong{font-size:28px}.metrics small{font-size:12px}
+  .presenting .studio>.dashboard{grid-template-columns:minmax(0,1fr) 380px}
+}
+@media(min-width:1000px) and (max-width:1250px){
+  .studio{grid-template-columns:260px minmax(0,1fr);gap:10px;padding:10px}
+  .parameter-panel{padding:13px}.parameter-heading h2{font-size:19px}
+  .parameter-panel label{font-size:13px}.parameter-panel input,.parameter-panel select{font-size:14px;height:34px}
+  .parameter-row{grid-template-columns:minmax(0,1fr) 93px;gap:8px}.material-fields .parameter-row{grid-template-columns:minmax(0,1fr) 136px}
+  .studio>.dashboard{grid-template-columns:minmax(0,1fr) 240px;grid-template-rows:minmax(360px,1fr) 154px}
+  .diagnostics>.panel{padding:11px 10px 8px}.diagnostics h2{font-size:16px}.needle-panel .card-heading{flex-wrap:wrap;gap:3px}
+  .spectrum-panel h1{font-size:20px}.spectrum-panel .legend{gap:9px;font-size:13px}.spectrum-panel .line{width:19px}
+  .spectrum-controls{flex-wrap:wrap;gap:6px;margin-top:8px}.preset-tabs{width:100%;justify-content:space-between}.preset-tabs button{font-size:12px;padding:5px 6px}
+  .studio>.run-bar{gap:10px}.studio>.run-bar .run-action{gap:5px}.primary{font-size:14px;padding:11px}.icon-button{width:32px;height:39px}
+  .run-description strong{font-size:14px}.run-description>span{font-size:13px}.stage-track>span{font-size:11px;padding:2px}
+  .run-status-line .stage-track{margin-left:0}.speed-control{align-self:start}.speed-control select{width:92px}
+  .structure-panel .material-legend{gap:7px}.structure-panel h2{font-size:17px}.structure-panel .material-legend>span{display:none}
+  .insertion-focus{min-width:140px;width:40%;padding-left:8px}.focus-heading,.focus-caption{font-size:12px}
+  .stack-selection{font-size:12px}.telemetry-panel .metrics{gap:10px 8px}.metrics span{font-size:11px}.metrics strong{font-size:22px}.metrics small{font-size:10px}
+}
+@media(max-width:999px){
+  .studio,.presenting .studio{display:flex;flex-direction:column;height:auto;min-height:0}
+  .parameter-panel{order:0;overflow:visible;padding:16px}.parameter-heading{margin-bottom:12px}
+  .parameter-panel form{display:grid;grid-template-columns:1fr 1fr;gap:8px 28px}.parameter-panel fieldset{margin:0}
+  .parameter-panel .advanced-parameters{grid-column:1/-1;margin-top:6px}
+  .studio>.run-bar{order:1}.studio>.dashboard{order:2;grid-template-columns:1fr 1fr;grid-template-rows:520px 280px 185px}
+  .presenting .studio>.dashboard{grid-template-columns:1fr 1fr;grid-template-rows:520px 280px 185px}
+  .parameter-row{grid-template-columns:minmax(0,1fr) 112px}.material-fields .parameter-row{grid-template-columns:minmax(0,1fr) 155px}
+  .parameter-panel fieldset:nth-child(2) legend{border:0;padding-top:0}
+  .run-status-line .stage-track{margin-left:auto}.stage-track>span{font-size:13px}.metrics small{font-size:12px}
+}
+@media(max-width:600px){
+  .parameter-panel{padding:16px}.parameter-panel form{display:block}.parameter-panel fieldset{margin-bottom:14px}
+  .parameter-panel fieldset:nth-child(2) legend{border-top:1px solid #e6ebf2;padding-top:10px}
+  .parameter-panel label{font-size:15px}.parameter-panel legend{font-size:16px}.parameter-panel input,.parameter-panel select{height:39px;font-size:16px}
+  .parameter-row{grid-template-columns:minmax(0,1fr) 130px}.material-fields .parameter-row{grid-template-columns:minmax(0,1fr) 185px}
+  .parameter-panel .advanced-parameters summary{font-size:15px}.parameter-heading h2{font-size:22px}
+  .run-status-line .stage-track{margin-left:0}.studio>.dashboard,.presenting .studio>.dashboard{display:flex;flex-direction:column}
+  .spectrum-panel h1{font-size:20px}.spectrum-panel .legend{font-size:13px;gap:10px}
+  .spectrum-controls{gap:9px}.spectrum-panel .preset-tabs{width:100%}.preset-tabs button{font-size:13px}
+  .insertion-focus{width:100%;min-width:0;border-left:0;padding-left:0}.metrics strong{font-size:27px}
+}

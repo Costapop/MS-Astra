@@ -7,13 +7,40 @@
   <title>MS Astra · Optical Coating Studio</title>
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="./src/dashboard.css">
+  <link rel="stylesheet" href="./src/parameters.css">
 </head>
 <body>
   <header class="toolbar">
     <a class="brand" href="./" aria-label="MS Astra home"><span class="brand-mark">✳</span><span>MS Astra <span class="brand-sub">Optical coating studio</span></span></a>
-    <nav aria-label="Studio controls"><button id="settingsButton" class="secondary">Design settings <span id="designSummary">L / H</span></button><button id="methodButton" class="text-button">The method</button><button id="presentButton" class="secondary">⛶ <span>Present</span></button><button id="exportButton" class="secondary">↓ <span>Export Excel</span></button></nav>
+    <nav aria-label="Studio controls"><button id="settingsButton" class="secondary" aria-controls="parametersPanel">Input parameters</button><button id="methodButton" class="text-button">The method</button><button id="presentButton" class="secondary">⛶ <span>Present</span></button><button id="exportButton" class="secondary">↓ <span>Export Excel</span></button></nav>
   </header>
   <main class="studio">
+    <aside id="parametersPanel" class="parameter-panel panel" aria-labelledby="parametersHeading">
+      <div class="parameter-heading"><h2 id="parametersHeading">Input parameters</h2><span>nm</span></div>
+      <form id="settingsForm" novalidate>
+        <fieldset><legend>Spectrum</legend>
+          <div class="parameter-pair"><label>From · nm<input id="lambdaMin" type="number" value="450" min="100" max="100000" step="10" aria-label="Minimum wavelength in nanometres"></label><label>To · nm<input id="lambdaMax" type="number" value="650" min="101" max="100000" step="10" aria-label="Maximum wavelength in nanometres"></label></div>
+          <label class="parameter-row">Spectral points<input id="points" type="number" min="5" max="1001" step="1" value="121"></label>
+        </fieldset>
+        <fieldset class="material-fields"><legend>Materials</legend>
+          <label class="parameter-row">Low index · L<select id="materialL"></select></label>
+          <label class="parameter-row">High index · H<select id="materialH"></select></label>
+          <label class="parameter-row">Substrate<select id="substrate"><option value="1.52">BK7 · 1.52</option></select></label>
+        </fieldset>
+        <fieldset><legend>Synthesis limits</legend>
+          <label class="parameter-row">Maximum layers<input id="maxLayers" type="number" min="1" max="80" step="1" value="24"></label>
+          <label class="parameter-row"><span class="parameter-label">Max. optical thickness<small>Σnd · nm</small></span><input id="maxOpticalThickness" type="number" min="1" max="100000" step="10" value="6000" aria-label="Maximum total optical thickness in nanometres"></label>
+          <label class="parameter-row"><span class="parameter-label">Maximum merit<small>MSE ≤</small></span><input id="targetMerit" type="number" min="0" max="1" step="0.0001" value="0.0001" aria-label="Maximum merit, mean squared error"></label>
+        </fieldset>
+        <fieldset><legend>Starting layer</legend>
+          <label class="parameter-row">Material<select id="startMaterial"><option>L</option><option selected>H</option></select></label>
+          <label class="parameter-row"><span class="parameter-label">Geometric thickness<small>nm</small></span><input id="startThickness" type="number" min="0.1" max="100000" step="0.1" value="100" aria-label="Starting geometric thickness in nanometres"></label>
+        </fieldset>
+        <details class="advanced-parameters"><summary>Advanced controls</summary><label class="parameter-row"><span class="parameter-label">Thin-layer cleanup<small>nm</small></span><input id="cleanupThickness" type="number" min="0" max="10" value="0.5" step="0.1"></label><label class="parameter-row">Evolution cycles<input id="maxCycles" type="number" min="1" max="40" value="8" step="1"></label></details>
+      </form>
+      <p id="parameterError" class="parameter-error" role="alert" hidden></p>
+    </aside>
+
     <section class="run-bar panel" aria-label="Synthesis controls">
       <div class="run-action"><button id="runButton" class="primary"><span>▶</span> Start evolution</button><button id="stopButton" class="icon-button" aria-label="Stop synthesis" title="Stop and keep best design" disabled>■</button><button id="resetButton" class="icon-button" aria-label="Reset design" title="Reset to starting layer">↺</button></div>
       <div class="run-description"><div class="run-status-line"><strong id="runStatus" role="status">Ready to evolve</strong><div class="stage-track" aria-label="Synthesis stages"><span data-stage="refinement"><i>1</i><b>Refine</b></span><span data-stage="needle"><i>2</i><b>Insert needle</b></span><span data-stage="growth"><i>3</i><b>Grow</b></span><span data-stage="cleanup"><i>4</i><b>Clean up</b></span><span data-stage="final"><i>5</i><b>Polish</b></span></div></div><span id="runMessage">A single layer. A spectrum of possibilities.</span></div>
@@ -22,7 +49,7 @@
     <div class="dashboard">
       <section class="panel spectrum-panel">
         <div class="card-heading"><h1>Reflectance spectrum <span class="chart-unit">R(λ)</span></h1><div class="legend"><span><i class="line target"></i>Target</span><span><i class="line achieved"></i>Current</span></div></div>
-        <div class="spectrum-controls"><div class="range-inputs"><label>From <input id="lambdaMin" type="number" value="450" min="100" max="100000" step="10" aria-label="Minimum wavelength in nanometres"></label><span>→</span><label>To <input id="lambdaMax" type="number" value="650" min="101" max="100000" step="10" aria-label="Maximum wavelength in nanometres"></label><span class="unit">nm</span><button id="fitSpectrumButton" class="scale-button" aria-pressed="false" title="Fit the vertical axis to the target and current spectrum">Fit R</button></div><div class="preset-tabs" role="group" aria-label="Target presets"><button data-preset="mirror" class="active">Mirror</button><button data-preset="edge">Edge filter</button><button data-preset="ar">Anti-reflection</button><button data-preset="split">Band reflector</button></div></div>
+        <div class="spectrum-controls"><div class="range-inputs"><span id="spectralRangeSummary" class="range-summary">450–650 nm</span><button id="fitSpectrumButton" class="scale-button" aria-pressed="false" title="Fit the vertical axis to the target and current spectrum">Fit R</button></div><div class="preset-tabs" role="group" aria-label="Target presets"><button data-preset="mirror" class="active">Mirror</button><button data-preset="edge">Edge filter</button><button data-preset="ar">Anti-reflection</button><button data-preset="split">Band reflector</button></div></div>
         <div class="spectrum-plot"><svg id="spectrum" viewBox="0 0 1000 350" role="img" aria-label="Reflectance spectrum: draggable target and current coating"></svg><div id="plotTooltip" class="plot-tooltip" hidden></div></div>
         <div class="plot-footer"><span id="spectrumReadout">Drag the target to edit · click the plot to inspect R.</span><button id="editBandsButton" class="text-button">Edit target ↗</button></div>
       </section>
@@ -35,15 +62,6 @@
     </div>
     <div id="errorBox" class="error-box" role="alert" hidden></div>
   </main>
-  <dialog id="settingsDialog" class="settings-dialog"><button class="dialog-close" aria-label="Close dialog">×</button><div class="eyebrow">DESIGN SPACE</div><h2>Set up the coating</h2><p class="dialog-intro">Two ideal materials. Air incidence. A semi-infinite substrate.</p>
-        <form id="settingsForm">
-          <fieldset><legend>Materials</legend><label>Low index <span>L</span><select id="materialL"></select></label><label>High index <span>H</span><select id="materialH"></select></label><label>Substrate<select id="substrate"><option value="1.52">BK7 · 1.52</option></select></label></fieldset>
-          <fieldset><legend>Starting layer</legend><div class="two-col"><label>Material<select id="startMaterial"><option>L</option><option selected>H</option></select></label><label>Thickness <span>nm</span><input id="startThickness" type="number" min="0.1" max="100000" step="0.1" value="100"></label></div></fieldset>
-          <fieldset><legend>Synthesis limits</legend><label>Spectral points<input id="points" type="number" min="5" max="1001" step="1" value="121"></label><label>Maximum layers<input id="maxLayers" type="number" min="1" max="80" step="1" value="24"></label><label>Maximum optical thickness <span>Σnd, nm</span><input id="maxOpticalThickness" type="number" min="1" max="100000" step="10" value="6000"></label><label>Target merit <span>MSE ≤</span><input id="targetMerit" type="number" min="0" max="1" step="0.0001" value="0.0001"></label>
-          <details><summary>Advanced controls</summary><label>Thin-layer cleanup <span>nm</span><input id="cleanupThickness" type="number" min="0" max="10" value="0.5" step="0.1"></label><label>Evolution cycles<input id="maxCycles" type="number" min="1" max="40" value="8" step="1"></label></details></fieldset>
-        </form>
-        <div class="settings-note">Ideal, constant refractive indices.<br>Absorption and dispersion are excluded.</div>
-  </dialog>
   <dialog id="targetDialog"><button class="dialog-close" aria-label="Close dialog">×</button><div class="eyebrow">TARGET SPECTRUM</div><h2>Shape your target</h2><p>Set constant reflectance levels in consecutive wavelength bands. You can also drag the bold target directly on the spectrum.</p><div id="bandEditor" class="band-editor"><div id="bandRows"></div><button id="addBand" class="secondary">+ Add band</button><p class="muted">R is the energy reflectance, from 0 to 1.</p></div></dialog>
   <dialog id="eventDialog"><button class="dialog-close" aria-label="Close dialog">×</button><div class="eyebrow">THE EVOLUTION TRAIL</div><h2>Every step has a purpose</h2><div id="eventLog" class="event-log"><div><i></i><span>Ready</span><p>Draw your target and start the synthesis.</p></div></div></dialog>
   <dialog id="methodDialog"><button class="dialog-close" aria-label="Close dialog">×</button><div class="eyebrow">THE PHYSICS, MADE VISIBLE</div><h2>Small insertions.<br>Remarkable evolution.</h2><p>The characteristic matrix of each lossless layer gives the reflectance at normal incidence. All thickness derivatives and needle sensitivities are calculated analytically.</p><ol><li><strong>Refine.</strong> Levenberg–Marquardt adjusts the geometric layer thicknesses.</li><li><strong>Insert.</strong> A negative needle derivative identifies a promising replacement of host material. A thin layer is inserted and refined.</li><li><strong>Grow.</strong> One layer moves to its nearest thicker local minimum, opening a new search region. Merit may temporarily increase.</li><li><strong>Clean up.</strong> Very thin layers are removed and adjacent equal materials merge.</li><li><strong>Polish.</strong> A final thickness optimization returns the best design found.</li></ol><p class="method-note">Merit F = mean[(R − Rtarget)²]. Optical thickness = Σ nᵢdᵢ. Layer order is air → substrate. Limits are enforced; an arbitrary target may be unattainable. Results are local numerical solutions, with no claim of global optimality.</p><p class="muted">Based on the supplied needle-method notes; verified against Alexander Tikhonravov, <em>Optical Coatings: Design, Characterization, Monitoring</em> (SPIE Press, 2024), and Furman &amp; Tikhonravov, <em>Basics of Optics of Multilayer Systems</em> (1992). See the repository methodology for equations and references.</p></dialog>
