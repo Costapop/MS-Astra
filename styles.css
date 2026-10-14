@@ -141,6 +141,22 @@ a:hover { text-decoration: underline; }
 .card > header h3 { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
 .card > header h3 .muted { margin-left: 6px; }
 .card-tools { margin-left: auto; }
+.tabs { margin-left: 4px; }
+.panel { flex: 1; min-height: 0; overflow: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 6px 18px 14px; }
+.panel h4 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); margin: 6px 0 6px; }
+.panel .row input { width: 120px; }
+.panel .chips { margin-top: 4px; }
+.panel .chip { padding: 7px 13px; font-size: 13px; }
+.panel .bands { max-width: 420px; }
+.settings-panel.locked { opacity: 0.6; pointer-events: none; }
+.preset-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.preset-table td { padding: 5px 6px 5px 0; border-bottom: 1px solid var(--line); color: var(--ink-2); vertical-align: top; }
+.preset-table td:first-child { color: var(--ink-3); white-space: nowrap; width: 38%; }
+#card-stats > header { flex-wrap: nowrap; }
+#cycle-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timer { flex: none; font-variant-numeric: tabular-nums; font-size: 12px; color: var(--ink-2); background: var(--control); border-radius: 999px; padding: 3px 9px; }
+#btn-starts { margin-left: 6px; }
+.swatch.ghost { width: 14px; height: 0; border-top: 2px dashed var(--ink-3); background: none; }
 .plot { flex: 1; position: relative; min-height: 0; }
 .plot canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 .legend { display: flex; gap: 12px; align-items: center; font-size: 12px; color: var(--ink-2); }
@@ -200,7 +216,6 @@ input.switch:checked::after { transform: translateX(16px); }
 .starts-list li.best { color: var(--good); font-weight: 600; }
 .starts-list li.running { color: var(--accent); }
 .starts-list li .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.swatch.ghost { width: 14px; height: 0; border-top: 2px dashed var(--series-current); background: none; }
 .starts-list li { cursor: default; }
 .starts-list li:hover { color: var(--needle); }
 .log li.folded { display: none; }
@@ -262,6 +277,7 @@ dialog.sheet header { display: flex; align-items: center; justify-content: space
   .legend { font-size: 11px; gap: 9px; }
   .progress { margin: 8px 16px 4px; }
 }
+@media (max-width: 900px) { .panel { grid-template-columns: 1fr; } }
 @media (max-width: 1180px) {
   .layout { grid-template-columns: 1fr; height: auto; flex: none; }
   .sidebar { order: 2; overflow: visible; }

@@ -9,7 +9,7 @@ import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
 
-export const VERSION = '2.1.3';
+export const VERSION = '2.2.0';
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------------ */
@@ -133,7 +133,7 @@ function syncForm() {
   $('thin-layer').value = settings.thinLayer; $('needle-width').value = settings.needleWidth; $('candidates').value = settings.candidates;
   $('dense-check').checked = settings.denseCheck; $('enrich-grid').checked = settings.enrichGrid; $('enrich-grid').disabled = !settings.denseCheck;
   $('legend-zone').hidden = !(settings.transition > 0 && settings.bands.length > 1);
-  renderPresets(); renderBands(); updateMeritHint(); updateLegendMaterials(); updateStartHint();
+  renderPresets(); renderBands(); updateMeritHint(); updateLegendMaterials(); updateStartHint(); renderPresetSummary();
 }
 
 function updateMeritHint() {
@@ -144,6 +144,25 @@ function updateLegendMaterials() {
   $('legend-h').textContent = `${materialH()?.label ?? 'H'} (H)`;
   $('legend-l').textContent = `${materialL()?.label ?? 'L'} (L)`;
 }
+function selectTab(name) {
+  for (const b of $('spectrum-tabs').querySelectorAll('button')) { const on = b.dataset.tab === name; b.classList.toggle('active', on); b.setAttribute('aria-selected', on); }
+  $('tab-chart').hidden = name !== 'chart'; $('tab-presets').hidden = name !== 'presets'; $('tab-target').hidden = name !== 'target';
+  $('spectrum-legend').hidden = name !== 'chart'; $('spectrum-tools').hidden = name !== 'chart';
+  if (name === 'chart') spectrum.resize(), spectrum.requestDraw();
+}
+
+function renderPresetSummary() {
+  const H = materialH(), L = materialL();
+  const rows = [
+    ['Spectral range', `${settings.lambdaMin}–${settings.lambdaMax} nm · ${settings.points} points${settings.transition ? ` · transition zone ${settings.transition} nm` : ''}`],
+    ['Target bands', settings.bands.map((b) => `${Math.round(b.from)}–${Math.round(b.to)} nm: R = ${(100 * b.R).toFixed(1)} %`).join('; ')],
+    ['Materials', `H = ${H.label} (${H.n.toFixed(2)}), L = ${L.label} (${L.n.toFixed(2)}), substrate ${substrate().label} (${substrate().n.toFixed(2)})`],
+    ['Starting design', settings.startMode === 'multi' ? `multi‑start (10 designs, ${settings.exploreBudget} s each)` : `${startMat().label} ${settings.startThickness} nm`],
+    ['Limits', `${settings.maxLayers} layers · ${settings.maxTOT} nm optical thickness · target F ${settings.targetMerit.toExponential(0)}`],
+  ];
+  $('preset-summary').innerHTML = `<h4>Current task</h4><table class="preset-table">${rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>`;
+}
+
 function updateStartHint() {
   if (settings.startMode !== 'multi') { $('start-hint').textContent = ''; return; }
   try {
@@ -221,7 +240,8 @@ const run = {
   stepTo: null,
   history: [], events: 0, F0: null, lastResult: null, cycle: 0, stage: '', engineLayers: [], problem: null, added: new Set(),
   dense: null, startName: null, exploreResults: [], exploreRanked: null, cfg: null,
-  ghosts: [], logExpanded: false,
+  ghosts: [], logExpanded: false, exploreLabel: null,
+  timer: { running: false, startedAt: 0, accum: 0 },
 };
 const LOG_TAIL = 5;
 const SPEED = { cinematic: 2.2, live: 1, fast: 0.25, instant: 0 };
@@ -249,7 +269,7 @@ function setInitialDesign() {
   structure.set({ xmax: view.xmax, layers: view.layers, nmax: Math.max(materialH().n, materialL().n), highlight: null, substrate: substrate().label, ns: substrate().n });
   meritChart.set({ history: [], targetF: settings.targetMerit });
   const F = merit(R, target, weights);
-  updateTiles({ F, layers, stage: 'Ready' });
+  updateTilesEntry({ F, layers, stage: 'Ready' });
   $('progress-bar').style.width = '0%';
   $('result-line').textContent = ''; $('result-line').classList.remove('good');
   $('cycle-label').textContent = 'Not started';
@@ -262,7 +282,7 @@ function setInitialDesign() {
   updateCurve(true);
 }
 
-function updateTiles({ F, layers, stage }) {
+function updateTilesEntry({ F, layers, stage }) {
   const tot = totalOpticalThickness(layers);
   $('t-merit').textContent = fmt.sci(F);
   $('t-rms').textContent = `${(100 * Math.sqrt(Math.max(F, 0))).toFixed(3)} %`;
@@ -281,12 +301,12 @@ function updateTiles({ F, layers, stage }) {
   if (stage) $('cycle-label').textContent = stage;
 }
 
-function setStage(text, cls) {
+function setStageEntry(text, cls) {
   $('stage-text').textContent = text;
   const el = $('stage-indicator'); el.className = 'stage-indicator' + (cls ? ' ' + cls : '');
 }
 
-function log(kind, html) {
+function logEntry(kind, html) {
   const ol = $('log');
   const li = document.createElement('li'); li.className = kind;
   li.innerHTML = `<span class="tag">${kind}</span><span>${html}</span>`;
@@ -303,7 +323,7 @@ function updateLogView() {
   ol.scrollTop = ol.scrollHeight;
 }
 
-function pushHistory(F, mark) { run.history.push({ F, mark }); meritChart.set({ history: run.history }); }
+function pushHistoryEntry(F, mark) { run.history.push({ F, mark }); meritChart.set({ history: run.history }); }
 
 function updateCurve(force) {
   if (view.hideCurve) { if (spectrum.state.curve) spectrum.set({ curve: null }); return; }
@@ -343,14 +363,19 @@ function layersFromEvent(evLayers, { animate = true } = {}) {
   view.curveDirty = true;
 }
 
-function applyEvent(ev, snap) {
+function applyEvent(ev, snap, opts = {}) {
+  const quiet = !!opts.preview;   // exploration preview: charts only, no log/history/tiles/result
+  const log = quiet ? () => {} : logEntry;
+  const pushHistory = quiet ? () => {} : pushHistoryEntry;
+  const updateTiles = quiet ? () => {} : updateTilesEntry;
+  const setStage = quiet ? (t, c) => setStageEntry(`${run.exploreLabel || 'Exploring'} · ${t}`, c) : setStageEntry;
   run.events++;
   switch (ev.type) {
     case 'start': {
       view.goalR = ev.R; if (snap) view.R = Float64Array.from(ev.R);
       layersFromEvent(ev.layers, { animate: !snap });
       run.F0 = ev.F; pushHistory(ev.F, null);
-      if (ev.name) run.startName = ev.name;
+      if (ev.name && !quiet) run.startName = ev.name;
       log('start', `Starting design${ev.name ? ` «${ev.name}»` : ''}: ${ev.layers.map((L) => `${L.m} ${L.d.toFixed(1)} nm`).join(', ')} · F = ${fmt.sci(ev.F)}`);
       setStage('Initial refinement', 'running'); run.stage = 'Initial refinement';
       updateTiles({ F: ev.F, layers: ev.layers, stage: 'Initial refinement' });
@@ -360,7 +385,7 @@ function applyEvent(ev, snap) {
       const names = { refine: ev.label || 'Refinement', needle: 'Needle search', cleanup: 'Thin‑layer cleanup', growth: 'Thickness growth', final: 'Final optimization' };
       run.stage = names[ev.stage] || ev.stage;
       setStage(`${run.cycle ? `Cycle ${run.cycle} · ` : ''}${run.stage}`, 'running');
-      $('cycle-label').textContent = run.cycle ? `Cycle ${run.cycle}` : 'Starting';
+      if (!quiet) $('cycle-label').textContent = run.cycle ? `Cycle ${run.cycle}` : 'Starting';
       if (ev.stage === 'needle' || ev.stage === 'growth' || ev.stage === 'cleanup' || ev.stage === 'final') { view.highlight = null; view.insertion = null; syncStructure(); needle.set({ insertion: null }); }
       if (ev.stage === 'refine') { view.tauD = 0.08; if (needle.state.scan) needle.set({ stale: true }); }
       break;
@@ -378,18 +403,19 @@ function applyEvent(ev, snap) {
       pushHistory(ev.F, null);
       updateTiles({ F: ev.F, layers: ev.layers });
       log('refine', `${run.stage}: F = <span class="v">${fmt.sci(ev.F)}</span> after ${ev.iterations} LM iterations (${ev.reason}).`);
-      run.lastResult = { layers: ev.layers, R: ev.R, F: ev.F, reason: null, stats: null };
-      $('btn-export').disabled = false;
+      if (!quiet) { run.lastResult = { layers: ev.layers, R: ev.R, F: ev.F, reason: null, stats: null }; $('btn-export').disabled = false; }
       view.highlight = null; syncStructure();
       break;
     }
     case 'dense': {
+      if (quiet) break;
       run.dense = { F: ev.F, maxDev: ev.maxDev, points: ev.points };
       updateTiles({ F: ev.Fgrid, layers: run.engineLayers });
       log('dense', `Independent check on ${ev.points} points: F = <span class="v">${fmt.sci(ev.F)}</span> (grid F = ${fmt.sci(ev.Fgrid)}), max |ΔR| = ${(100 * ev.maxDev).toFixed(2)} p.p.`);
       break;
     }
     case 'grid': {
+      if (quiet) { layersFromEvent(ev.layers, { animate: !snap }); view.goalR = ev.R; break; }
       run.problem = { grid: ev.wavelengths, target: ev.target, weights: ev.weights };
       for (const w of ev.added) run.added.add(w);
       spectrum.set({ grid: ev.wavelengths, target: ev.target, weights: ev.weights, added: run.added });
@@ -404,7 +430,7 @@ function applyEvent(ev, snap) {
       const scanLayers = toDisplayLayers(ev.layers);
       const c = ev.candidates[0] || null;
       view.candidate = c ? { ...c, pulse: 0, label: `best g: ${matLabel(c.nm)} at z = ${c.z.toFixed(1)} nm (g = ${(c.g).toExponential(2)})` } : null;
-      needle.set({ scan: { z: ev.z, g: ev.g, layer: ev.layer }, layers: scanLayers, candidate: view.candidate, insertion: null, stale: false });
+      needle.set({ scan: { z: ev.z, g: ev.g, layer: ev.layer }, layers: scanLayers, candidate: view.candidate, insertion: null, stale: false, annotations: null, banner: null });
       view.insertion = null;
       view.goalXmax = Math.max(view.goalXmax, ev.total * 1.06);
       break;
@@ -484,9 +510,10 @@ function applyEvent(ev, snap) {
       pushHistory(ev.F, 'done');
       if (ev.dense) run.dense = { F: ev.dense.F, maxDev: ev.dense.maxDev, points: ev.dense.wavelengths.length };
       run.problem = { grid: ev.grid.wavelengths, target: ev.grid.target, weights: ev.grid.weights };
-      updateTiles({ F: ev.F, layers: ev.layers, stage: `Finished · ${ev.reason.split(' · ')[0]}` });
+      updateTiles({ F: ev.F, layers: ev.layers, stage: `Finished · ${ev.reason.split(' · ')[0]}` }); $('cycle-label').title = ev.reason;
       run.lastResult = { layers: ev.layers, R: ev.R, F: ev.F, reason: ev.reason, stats: ev.stats, dense: ev.dense, grid: ev.grid, elapsedMs: ev.elapsedMs };
       run.finished = true; run.running = false;
+      if (!quiet) { timerPause(); timerDraw(); }
       const ok = ev.F <= settings.targetMerit && (!ev.dense || ev.dense.F <= settings.targetMerit);
       setStage(`Finished — ${ev.reason.split(' · ')[0]}`, 'done'); $('stage-text').title = ev.reason;
       const rl = $('result-line');
@@ -504,18 +531,27 @@ function applyEvent(ev, snap) {
 /* ------------------------------------------------------------------ */
 /*  Runner                                                             */
 /* ------------------------------------------------------------------ */
-function lockSidebar() { $('sidebar').classList.add('locked'); spectrum.set({ editable: false }); }
-function unlockSidebar() { $('sidebar').classList.remove('locked'); spectrum.set({ editable: true }); }
+function lockSidebar() { $('sidebar').classList.add('locked'); for (const p of document.querySelectorAll('.settings-panel')) p.classList.add('locked'); spectrum.set({ editable: false }); }
+function unlockSidebar() { $('sidebar').classList.remove('locked'); for (const p of document.querySelectorAll('.settings-panel')) p.classList.remove('locked'); spectrum.set({ editable: true }); }
+
+/* ---- elapsed-time counter ---- */
+function timerStart() { run.timer = { running: true, startedAt: performance.now(), accum: 0 }; }
+function timerPause() { if (run.timer.running) { run.timer.accum += performance.now() - run.timer.startedAt; run.timer.running = false; } }
+function timerResume() { if (!run.timer.running && run.timer.startedAt) { run.timer.startedAt = performance.now(); run.timer.running = true; } }
+function timerReset() { run.timer = { running: false, startedAt: 0, accum: 0 }; $('t-elapsed').textContent = '0:00.0'; }
+function timerMs() { return run.timer.accum + (run.timer.running ? performance.now() - run.timer.startedAt : 0); }
+function timerDraw() { const ms = timerMs(); const m = Math.floor(ms / 60000), sec = (ms - 60000 * m) / 1000; $('t-elapsed').textContent = `${m}:${sec < 10 ? '0' : ''}${sec.toFixed(1)}`; }
 
 function startRun() {
   if (!validate()) return;
   setInitialDesign();
   run.cfg = engineConfig();
   run.running = true; run.paused = false; run.finished = false; run.holdUntil = 0; run.cycle = 0; run.stepTo = null;
+  timerStart(); selectTab('chart');
   lockSidebar();
   $('btn-run').textContent = 'Pause'; $('btn-step').disabled = false; $('btn-export').disabled = true;
   if (settings.startMode === 'multi') startExploration();
-  else { run.gen = synthesize(run.cfg); setStage('Starting…', 'running'); }
+  else { run.gen = synthesize(run.cfg); setStageEntry('Starting…', 'running'); }
 }
 
 function startExploration() {
@@ -528,15 +564,19 @@ function startExploration() {
     li.addEventListener('mouseenter', () => highlightGhost(i)); li.addEventListener('mouseleave', () => highlightGhost(null));
     ol.appendChild(li);
   });
-  view.hideCurve = true; spectrum.set({ curve: null, R: null, ghosts: run.ghosts, ghostHighlight: null }); $('legend-ghost').hidden = false;
-  setStage(`Exploring ${list.length} starting designs in the background…`, 'running');
+  view.hideCurve = false; spectrum.set({ curveDashed: true, ghosts: run.ghosts, ghostHighlight: null }); $('legend-ghost').hidden = false;
+  setStageEntry(`Exploring ${list.length} starting designs in the background…`, 'running');
   $('cycle-label').textContent = 'Exploration';
-  log('explore', `Multi‑start: ${list.length} starting designs, up to ${settings.exploreBudget} s each. The best result is replayed afterwards.`);
+  logEntry('explore', `Multi‑start: ${list.length} starting designs, up to ${settings.exploreBudget} s each. The best result is replayed afterwards.`);
   const onEvent = (ev) => {
     if (!run.exploring) return;
     if (ev.type === 'explore-start') {
       const li = $(`explore-${ev.index}`); if (li) li.classList.add('running');
-      setStage(`Exploring starting design ${ev.index + 1} of ${ev.total}: ${ev.name}`, 'running');
+      run.exploreLabel = `Start ${ev.index + 1}/${ev.total} «${ev.name}»`; run.cycle = 0;
+      setStageEntry(`${run.exploreLabel} · starting`, 'running');
+      $('cycle-label').textContent = `Exploration ${ev.index + 1}/${ev.total}`;
+    } else if (ev.type === 'explore-event') {
+      applyEvent(ev.ev, false, { preview: true });
     } else if (ev.type === 'explore-result') {
       run.exploreResults.push(ev);
       const Rg = reflectance(ev.layers.map((L) => ({ n: L.n, d: L.d })), view.displayGrid, substrate().n);
@@ -545,24 +585,29 @@ function startExploration() {
       spectrum.set({ ghosts: run.ghosts.filter(Boolean).map((g) => g) });
       const li = $(`explore-${ev.index}`);
       if (li) { li.classList.remove('running'); li.querySelector('.f').textContent = `F ${fmt.sci(ev.score)}`; li.querySelector('.l').textContent = `${ev.layers.length} L`; }
-      log('explore', `Start «${ev.name}»: ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>${ev.Fdense != null ? ` (dense ${fmt.sci(ev.Fdense)})` : ''}, ${ev.reason.toLowerCase()}, ${(ev.elapsedMs / 1000).toFixed(1)} s.`);
+      logEntry('explore', `Start «${ev.name}»: ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>${ev.Fdense != null ? ` (dense ${fmt.sci(ev.Fdense)})` : ''}, ${ev.reason.toLowerCase()}, ${(ev.elapsedMs / 1000).toFixed(1)} s.`);
     } else if (ev.type === 'explore-done') {
       run.exploring = false;
       if (run.worker) { run.worker.terminate(); run.worker = null; }
       const best = ev.best;
       ev.results.forEach((r, rank) => { const li = $(`explore-${r.index}`); if (li) { li.classList.toggle('best', rank === 0); if (rank === 0) li.querySelector('.n').textContent = `★ ${r.name}`; } });
-      log('explore', `Best starting design: «${best.name}» (F = ${fmt.sci(best.F)}, ${best.layers.length} layers). Replaying its evolution.`);
+      logEntry('explore', `Best starting design: «${best.name}» (F = ${fmt.sci(best.F)}, ${best.layers.length} layers). Replaying its evolution.`);
       run.startName = best.name; run.exploreRanked = ev.results;
       document.querySelector('#card-stats .tiles').hidden = false; $('btn-starts').hidden = false; $('explore-list').classList.remove('exploring');
+      run.exploreLabel = null; run.cycle = 0;
+      // restore the optimization grid shown on the chart (previews may have enriched their own grids) and switch to the solid synthesis curve
+      const pb = buildProblem(); run.problem = { grid: pb.grid, target: pb.target, weights: pb.weights }; run.added = new Set();
+      spectrum.set({ grid: pb.grid, target: pb.target, weights: pb.weights, added: run.added, curveDashed: false });
+      needle.set({ scan: null, candidate: null, insertion: null, annotations: null, banner: null, stale: false });
       view.hideCurve = false; view.curveDirty = true;
       // replay deterministically: a budget-limited start is replayed with the same amount of work
       const replayCfg = { ...run.cfg, start: { ...best.start, name: best.name } };
       if (best.stopKind === 'budget') { replayCfg.maxRefinements = best.refinements; replayCfg.budgetReason = best.baseReason; }
       run.gen = synthesize(replayCfg);
       run.holdUntil = 0;
-      setStage(`Replaying the best start: ${best.name}`, 'running');
+      setStageEntry(`Replaying the best start: ${best.name}`, 'running');
     } else if (ev.type === 'explore-error') {
-      log('note', `Exploration failed: ${ev.message}. Falling back to the single starting layer.`);
+      logEntry('note', `Exploration failed: ${ev.message}. Falling back to the single starting layer.`);
       run.exploring = false; if (run.worker) { run.worker.terminate(); run.worker = null; }
       run.gen = synthesize(run.cfg);
     }
@@ -582,13 +627,14 @@ function startExploration() {
 }
 
 function resetRun() {
-  run.gen = null; run.running = false; run.paused = false; run.finished = false; run.stepTo = null; run.exploring = false;
+  run.gen = null; run.running = false; run.paused = false; run.finished = false; run.stepTo = null; run.exploring = false; run.exploreLabel = null;
   if (run.worker) { run.worker.terminate(); run.worker = null; }
+  timerReset(); spectrum.set({ curveDashed: false });
   unlockSidebar();
   validate();
   setInitialDesign();
   $('btn-run').textContent = 'Start synthesis'; $('btn-step').disabled = false;
-  setStage('Ready — draw the target and press Start', '');
+  setStageEntry('Ready — draw the target and press Start', '');
 }
 
 function pullEvent(snap) {
@@ -608,7 +654,7 @@ function frame(now) {
   if (run.gen && (run.running && !run.paused || run.stepTo)) {
     if (run.stepTo) {
       for (let i = 0; i < 20000; i++) { const ev = pullEvent(true); if (!ev || SIGNIFICANT.has(ev.type)) break; }
-      run.stepTo = null; run.paused = true; if (!run.finished) { $('btn-run').textContent = 'Resume'; setStage(`${$('stage-text').textContent} · paused`, 'paused'); }
+      run.stepTo = null; run.paused = true; if (!run.finished) { $('btn-run').textContent = 'Resume'; setStageEntry(`${$('stage-text').textContent} · paused`, 'paused'); }
     } else if (factor === 0) {
       const t0 = performance.now();
       while (performance.now() - t0 < 12) { const ev = pullEvent(true); if (!ev) break; }
@@ -622,6 +668,7 @@ function frame(now) {
     }
   }
   animate(dt, factor === 0);
+  if (run.timer.running) timerDraw();
 }
 
 function animate(dt, snap) {
@@ -704,9 +751,10 @@ function init() {
   $('btn-run').addEventListener('click', () => {
     if ((!run.gen && !run.exploring) || run.finished) { startRun(); return; }
     run.paused = !run.paused;
+    if (run.gen) { if (run.paused) timerPause(); else timerResume(); }
     $('btn-run').textContent = run.paused ? 'Resume' : 'Pause';
-    if (run.paused) setStage(`${$('stage-text').textContent} · paused`, 'paused');
-    else { setStage($('stage-text').textContent.replace(' · paused', ''), 'running'); run.holdUntil = 0; }
+    if (run.paused) setStageEntry(`${$('stage-text').textContent} · paused`, 'paused');
+    else { setStageEntry($('stage-text').textContent.replace(' · paused', ''), 'running'); run.holdUntil = 0; }
   });
   $('btn-step').addEventListener('click', () => {
     if ((!run.gen && !run.exploring) || run.finished) { if (!validate()) return; startRun(); run.paused = true; }
@@ -718,6 +766,7 @@ function init() {
   $('recipe-close').addEventListener('click', () => $('recipe-dialog').close());
   $('btn-starts').addEventListener('click', showStarts);
   $('btn-log-all').addEventListener('click', () => { run.logExpanded = !run.logExpanded; updateLogView(); });
+  for (const b of $('spectrum-tabs').querySelectorAll('button')) b.addEventListener('click', () => selectTab(b.dataset.tab));
   $('starts-close').addEventListener('click', () => $('starts-dialog').close());
   document.addEventListener('keydown', (e) => {
     if (e.target !== document.body) return;
