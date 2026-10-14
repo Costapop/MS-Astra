@@ -207,3 +207,41 @@ test('the built-in self-check of the termination reason passes for every preset 
   assert.equal(done.reason, b.reason);
   assert.equal(done.stop.verified, true, done.stop.checks.filter((c) => !c.ok).map((c) => c.name).join('; '));
 });
+
+/* ---------------- v2.2.2: plain-language termination summary ---------------- */
+test('the termination summary names the decisive stopping condition and agrees with the structured cause', () => {
+  const expectDecisive = (st) => st.kind === 'target' ? 'target' : st.kind === 'tot' ? 'tot' : st.kind === 'budget' ? 'budget' : st.kind === 'cycles' ? 'cycles'
+    : st.needleStop === 'layer-limit' ? 'layers' : (st.needleStop === 'stationary' || st.needleStop === 'no-gain') ? 'needle' : 'growth';
+  const seen = new Set();
+  for (const key of Object.keys(PRESETS)) for (const tm of [PRESETS[key].merit, 1e-9]) {
+    const cfg = presetConfig(key, tm);
+    const { done } = runAll(cfg);
+    const s = done.stop.summary;
+    assert.ok(s && s.headline && s.detail && s.reported, `${key}: summary missing`);
+    assert.equal(s.decisive, expectDecisive(done.stop), `${key} (${tm}): decisive ${s.decisive} vs stop ${done.stop.kind}/${done.stop.needleStop}`);
+    seen.add(s.decisive);
+    for (const k of ['target', 'layers', 'tot', 'needle', 'growth']) assert.ok(s.facts.some((f) => f.key === k), `${key}: fact ${k} missing`);
+    const d = s.facts.filter((f) => f.decisive);
+    assert.equal(d.length, 1);
+    if (d[0].key !== 'target' || /^Target merit reached$/.test(s.headline)) assert.ok(d[0].hit, `${key}: decisive fact «${d[0].label}» not satisfied: ${d[0].text}`);
+    // every fact's wording agrees with its flag
+    for (const f of s.facts) {
+      if (f.key === 'target') assert.equal(f.hit, done.F <= tm && (!done.dense || done.dense.F <= tm));
+      if (f.key === 'tot') assert.equal(f.hit, done.stop.kind === 'tot');
+      if (f.key === 'layers' && f.hit) assert.ok(/reached/.test(f.text) && !/not reached/.test(f.text));
+      if (!f.hit) assert.ok(/not reached|still possible|growth step|not needed/.test(f.text), `${key}: ${f.label}: ${f.text}`);
+    }
+    // the headline is one of the plain-language causes
+    assert.match(s.headline, /^(Target merit reached|Optical‑thickness limit reached|Layer limit reached|Needle variations no longer reduce the merit|No further progress|Needle cycle step limit reached|Time budget exhausted|Work budget exhausted|Cycle budget exhausted)/);
+    // the reported-design sentence matches the archive flag
+    assert.equal(/best archived/.test(s.reported), !!done.stop.fromArchive);
+    // the layer limit excluding interior needles is reported as the cause, never as "no needle lowers the merit"
+    if (done.stop.layerLimitPartial) { assert.equal(done.stop.needleStop, 'layer-limit'); assert.ok(done.stop.terminal.layers >= cfg.maxLayers - 1); if (done.stop.kind === 'stagnation') assert.match(done.reason, /blocks needles inside the layers/); }
+  }
+  assert.ok(seen.size >= 2, `decisive causes exercised: ${[...seen]}`);
+  // multi-start results carry the same summary; the ranking is by score
+  const cfg = { ...presetConfig('mirror', 1e-9), budgetMs: 3000 };
+  let final = null; for (const ev of explore(cfg)) if (ev.type === 'explore-done') final = ev;
+  for (const r of final.results) assert.ok(r.summary && r.summary.headline && r.summary.facts.length >= 5, `${r.name}: summary missing`);
+  for (let i = 1; i < final.results.length; i++) assert.ok(final.results[i - 1].score <= final.results[i].score);
+});

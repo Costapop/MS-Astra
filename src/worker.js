@@ -31,7 +31,7 @@ self.onmessage = (e) => {
         }
       }
       const score = done.dense ? Math.max(done.F, done.dense.F) : done.F;
-      const r = { index: i, name: s.name, start: s.start, F: done.F, Fdense: done.dense ? done.dense.F : null, score, layers: done.layers, opticalThickness: done.opticalThickness, reason: done.reason, baseReason: done.stop.base, stopKind: done.stop.kind, refinements: done.stop.refinements, elapsedMs: done.elapsedMs };
+      const r = { index: i, name: s.name, start: s.start, F: done.F, Fdense: done.dense ? done.dense.F : null, score, layers: done.layers, opticalThickness: done.opticalThickness, reason: done.reason, baseReason: done.stop.base, stopKind: done.stop.kind, summary: done.stop.summary, refinements: done.stop.refinements, elapsedMs: done.elapsedMs };
       results.push(r);
       self.postMessage({ type: 'explore-result', ...r });
     }

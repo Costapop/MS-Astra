@@ -48,13 +48,19 @@ evidence: [docs/VERIFICATION.md](docs/VERIFICATION.md).
 3. Press **Start synthesis**. The pace control (Cinematic / Live / Fast /
    Instant) sets how long each stage is held on screen; **Step** advances to
    the next event, Space pauses and resumes.
-4. Read the result in the tiles and the event log (folded to the last five
-   events; every needle step lists the refined alternatives), check the final
-   needle‑derivative verdict on its chart, hover the starts list to compare
-   the explored starting designs on the spectrum, open the **Layer table** or
-   the **Starts** ranking, and **Export Excel** to download the target and
-   synthesized spectra, the coating parameters, the dense‑grid verification
-   and the multi‑start ranking.
+4. Read the verdict in the Synthesis card — why the run stopped (target
+   reached, layer limit, optical‑thickness limit, needle variations no longer
+   reduce the merit, no further progress, budget) with the state of every
+   stopping condition, why this design was chosen (for multi‑start: the
+   ranking by `max(F, F_dense)` and the runner‑up; the replay is checked
+   against the explored result) and which design is reported — then the
+   tiles and the event log (folded to the last five events; every needle
+   step lists the refined alternatives), check the final needle‑derivative
+   verdict on its chart, hover the starts list to compare the explored
+   starting designs on the spectrum, open the **Layer table** or the
+   **Starts** ranking, and **Export Excel** to download the target and
+   synthesized spectra, the coating parameters, the dense‑grid verification,
+   the termination summary and the multi‑start ranking.
 
 Materials (constant indices): MgF₂ 1.38, SiO₂ 1.46, Al₂O₃ 1.63, HfO₂ 1.95,
 Ta₂O₅ 2.10, TiO₂ 2.45, ZnS 2.35, a‑Si 3.95, K8 1.52, fused quartz 1.46,
@@ -84,6 +90,6 @@ Serve the files over HTTP (the application uses JavaScript modules).
 - `src/xlsx.js` — dependency‑free Excel writer.
 - `tests/` — verification against closed forms, an independent matrix code, finite differences, the specification's worked example and the book's designs.
 
-Release notes: [docs/RELEASE-v2.2.1.md](docs/RELEASE-v2.2.1.md), [v2.2.0](docs/RELEASE-v2.2.0.md), [v2.1.3](docs/RELEASE-v2.1.3.md), [v2.1.1](docs/RELEASE-v2.1.1.md), [v2.1.0](docs/RELEASE-v2.1.0.md), [v2.0.0](docs/RELEASE-v2.0.0.md). The source
+Release notes: [docs/RELEASE-v2.2.2.md](docs/RELEASE-v2.2.2.md), [v2.2.1](docs/RELEASE-v2.2.1.md), [v2.2.0](docs/RELEASE-v2.2.0.md), [v2.1.3](docs/RELEASE-v2.1.3.md), [v2.1.1](docs/RELEASE-v2.1.1.md), [v2.1.0](docs/RELEASE-v2.1.0.md), [v2.0.0](docs/RELEASE-v2.0.0.md). The source
 books and the private method specification are not distributed with this
 repository.
