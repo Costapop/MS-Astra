@@ -1,0 +1,62 @@
+# MS Astra
+
+A visual laboratory for **Gradual Evolution synthesis of multilayer optical coatings**. Draw a piecewise-constant reflectance target and watch a single layer evolve through thickness refinement, analytic needle insertion, deliberate thickness growth, cleanup, and final optimization.
+
+The English interface is designed for live demonstrations: large animated spectrum, needle-sensitivity and coating views, a merit history, presentation mode, and Excel export. Calculations run in your browser; no account, backend, external service, or runtime dependency is required.
+
+## Run locally
+
+Requires **Node.js 20 or newer**. There are no packages to install.
+
+```sh
+npm run dev
+```
+
+Open [http://127.0.0.1:4173](http://127.0.0.1:4173).
+
+```sh
+npm test
+npm run build
+```
+
+The build creates a standalone static application in `dist/`. Serve that directory with any static HTTP server. For a local build preview:
+
+```sh
+node scripts/serve.mjs dist
+```
+
+Use HTTP rather than opening `index.html` directly; the application uses JavaScript modules.
+
+## Demonstrate a synthesis
+
+1. Choose the low- and high-index materials, starting material, and starting geometric thickness.
+2. Set the wavelength interval and spectral sample count. Choose **Mirror**, **Edge filter**, **Anti-reflection**, or **Band reflector** as a starting target.
+3. Drag a target level vertically to change reflectance. Drag a boundary horizontally to move it in wavelength, including the two interval-end handles. **Edit target** provides numerical band editing.
+4. Set the maximum layer count, maximum **total optical thickness** `Σ nᵢdᵢ`, and **Target merit**. The merit is the mean squared difference between computed and target fractional reflectance.
+5. Select **Start evolution**; the same button pauses and resumes the run. Use **Pace** to change demonstration speed and **Present** for a larger presentation view. The stop control keeps the best observed design; reset returns to the starting layer.
+6. Inspect **Needle sensitivity**, select a layer in **The living stack**, and open **Layer recipe**. Choose **Export Excel** to download the result.
+
+Negative needle sensitivity identifies a promising replacement of host material. A growth step can temporarily raise the merit: this is an intentional part of Gradual Evolution. The solver retains the best feasible design found.
+
+The `.xlsx` workbook includes the target and computed spectrum, residuals, layer materials and refractive indices, geometric and optical thicknesses, run settings, and recorded evolution checkpoints. Layer 1 faces air in both the application and export.
+
+## Physical model
+
+- Normal incidence from air, `n = 1`, onto a coating on semi-infinite BK7, `n = 1.52`.
+- Two homogeneous, isotropic materials with constant real refractive indices; no absorption or dispersion.
+- Wavelengths and thicknesses in nanometers; reflectance is an energy coefficient between 0 and 1.
+- Analytic characteristic-matrix thickness and needle derivatives, with constrained Levenberg–Marquardt refinement.
+
+Catalog names represent the specified ideal constant-index model, including materials that absorb or disperse in real use. Results are numerical designs under these assumptions, not manufacturing qualification. A requested target may be unattainable; termination and merit describe what the bounded local search achieved.
+
+Read [the mathematical method and verification references](docs/METHOD.md) for equations, the actual search policy, limits, and source page numbers.
+
+## Repository
+
+- `src/optics.js` — forward optical model and analytic sensitivities.
+- `src/optimizer.js` — constrained refinement and Gradual Evolution.
+- `src/export.js` — genuine Office Open XML workbook export.
+- `tests/` — numerical and export checks.
+- `docs/METHOD.md` — mathematical conventions and references.
+
+Source books and private reference documents are not distributed with this release.
