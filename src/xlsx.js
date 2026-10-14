@@ -170,6 +170,13 @@ export function resultWorkbook({ settings, wavelengths, target, weights, R, laye
       ['Result: total geometric thickness, nm', totGeo],
       ['Result: total optical thickness, nm', totOpt],
       ['Termination', result.reason || ''],
+      ...(result.summary ? [
+        ['Termination: decisive cause', `${result.summary.headline} — ${result.summary.detail}`],
+        ...result.summary.facts.map((f) => [`Stopping condition: ${f.label}`, `${f.hit ? 'holds' : 'does not hold'}${f.decisive ? ' (decisive)' : ''} — ${f.text}`]),
+        ['Reported design', result.summary.reported],
+        ['Termination reason self‑check', result.verified == null ? '' : result.verified ? 'passed' : 'FAILED'],
+      ] : []),
+      ...(result.selection ? [['Design selection', result.selection]] : []),
       ['Needles inserted / alternatives refined / rejected', `${result.stats?.needles ?? 0} / ${result.stats?.compared ?? 0} / ${result.stats?.rejected ?? 0}`],
       ['Grid enrichments / points added', `${result.stats?.enrichments ?? 0} / ${result.stats?.pointsAdded ?? 0}`],
       ['Synthesis time, s', result.elapsedMs != null ? result.elapsedMs / 1000 : ''],
@@ -195,12 +202,12 @@ export function resultWorkbook({ settings, wavelengths, target, weights, R, laye
   }
   if (starts && starts.length) {
     sheets.push({
-      name: 'Starts', title: 'Multi‑start exploration',
+      name: 'Starts', title: 'Multi‑start exploration — ranked by the score max(F, F_dense); the lowest score wins and is replayed',
       columns: [
-        { title: 'Starting design', width: 40 }, { title: 'Merit F', width: 14, style: 5 }, { title: 'Dense‑grid F', width: 14, style: 5 },
-        { title: 'Layers', width: 8 }, { title: 'Optical thickness, nm', width: 20, style: 3 }, { title: 'Termination', width: 44 }, { title: 'Time, s', width: 9, style: 3 },
+        { title: 'Rank', width: 6 }, { title: 'Starting design', width: 40 }, { title: 'Score max(F, F_dense)', width: 20, style: 5 }, { title: 'Merit F', width: 14, style: 5 }, { title: 'Dense‑grid F', width: 14, style: 5 },
+        { title: 'Layers', width: 8 }, { title: 'Optical thickness, nm', width: 20, style: 3 }, { title: 'Decisive cause', width: 36 }, { title: 'Termination', width: 44 }, { title: 'Time, s', width: 9, style: 3 },
       ],
-      rows: starts.slice().sort((a, b) => a.score - b.score).map((r) => [r.name, r.F, r.Fdense ?? 'not checked', r.layers.length, r.opticalThickness, r.reason, r.elapsedMs / 1000]),
+      rows: starts.slice().sort((a, b) => a.score - b.score).map((r, i) => [i + 1, r.name, r.score, r.F, r.Fdense ?? 'not checked', r.layers.length, r.opticalThickness, r.summary ? r.summary.headline : '', r.reason, r.elapsedMs / 1000]),
     });
   }
   return buildWorkbook(sheets);

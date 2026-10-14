@@ -1,4 +1,4 @@
-# MS Astra 2.1 — verification evidence
+# MS Astra — verification evidence
 
 Run `npm test` (Node 20+). All checks are automated in `tests/`.
 
@@ -43,6 +43,13 @@ Run `npm test` (Node 20+). All checks are automated in `tests/`.
   ranking is monotone, the winner respects the limits and is never worse than
   the manual start.
 * Constrained LM keeps `d ≥ 0` and honours the optical‑thickness bound.
+* Termination (v2.1.2–v2.2.2): for every preset at its own target and at an
+  unreachable one, the reason sentence is backed by the recorded facts, the
+  built‑in self‑check passes, the plain‑language summary names a decisive
+  condition that holds and agrees with the reason, every condition's wording
+  agrees with its flag, and the reported‑design sentence matches the archive
+  flag; a budget‑limited exploration result is replayed exactly; the
+  multi‑start winner replays to the identical reason.
 
 ## Excel export (`tests/xlsx.test.js`)
 
@@ -64,5 +71,8 @@ the ghost spectra of the explored starts with hover highlighting; the
 Presets and Target tabs of the spectrum card edit the task; the elapsed‑time
 counter runs through exploration and replay; the final needle check annotates the chart with
 the verdict and the refined ΔF of the best candidates; the event log folds to
-the last five events; Excel download (with Verification and Starts sheets)
-works; layer and starts tables open.
+the last five events; the Synthesis card verdict (headline, stopping
+conditions, why this design, reported design) agrees with the engine for
+every preset and for multi‑start in Instant, Fast and Live paces, the
+multi‑start replay matching the explored winner; Excel download (with
+Verification and Starts sheets) works; layer and starts tables open.

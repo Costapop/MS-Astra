@@ -9,7 +9,7 @@ import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
 
-export const VERSION = '2.2.1';
+export const VERSION = '2.2.2';
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------------ */
@@ -514,27 +514,64 @@ function applyEvent(ev, snap, opts = {}) {
       pushHistory(ev.F, 'done');
       if (ev.dense) run.dense = { F: ev.dense.F, maxDev: ev.dense.maxDev, points: ev.dense.wavelengths.length };
       run.problem = { grid: ev.grid.wavelengths, target: ev.grid.target, weights: ev.grid.weights };
-      updateTiles({ F: ev.F, layers: ev.layers, stage: `Finished · ${ev.reason.split(' · ')[0]}` }); $('cycle-label').title = ev.reason;
-      run.lastResult = { layers: ev.layers, R: ev.R, F: ev.F, reason: ev.reason, stop: ev.stop, stats: ev.stats, dense: ev.dense, grid: ev.grid, elapsedMs: ev.elapsedMs };
+      const headline = ev.stop && ev.stop.summary ? ev.stop.summary.headline : ev.reason.split(' · ')[0];
+      updateTiles({ F: ev.F, layers: ev.layers, stage: `Finished · ${headline}` }); $('cycle-label').title = ev.reason;
+      run.lastResult = { layers: ev.layers, R: ev.R, F: ev.F, reason: ev.reason, stop: ev.stop, stats: ev.stats, dense: ev.dense, grid: ev.grid, elapsedMs: ev.elapsedMs, opticalThickness: ev.opticalThickness };
       run.finished = true; run.running = false;
       if (!quiet) { timerPause(); timerDraw(); }
       const ok = ev.F <= settings.targetMerit && (!ev.dense || ev.dense.F <= settings.targetMerit);
-      setStage(`Finished — ${ev.reason.split(' · ')[0]}`, 'done'); $('stage-text').title = ev.reason;
+      setStage(`Finished — ${headline}`, 'done'); $('stage-text').title = ev.reason;
+      const verdict = buildVerdict(ev);
+      run.lastResult.selection = verdict.selectionText; run.lastResult.replayMatch = verdict.replayMatch;
       const rl = $('result-line');
+      rl.innerHTML = verdict.html;
+      rl.classList.toggle('good', ok);
+      if (settings.startMode === 'multi' && run.exploreRanked) startLabel(`winner «${run.startName}» of ${run.exploreRanked.length} — replayed`, true);
+      else startLabel(`${startMat().label} ${settings.startThickness} nm`, false);
+      if (!quiet) $('card-stats').scrollTop = 0;
       const checks = ev.stop && ev.stop.checks ? ev.stop.checks : [];
       const failed = checks.filter((c) => !c.ok);
-      const checkHtml = checks.length ? (failed.length ? `<span class="check bad" title="${failed.map((c) => `${c.name} (${c.detail})`).join('; ')}">⚠ reason check failed (${failed.length} of ${checks.length})</span>` : `<span class="check" title="${checks.map((c) => c.name).join('; ')}">✓ reason verified (${checks.length} checks)</span>`) : '';
-      const startInfo = settings.startMode === 'multi' ? `Multi‑start: winner «${run.startName}» of ${run.exploreRanked ? run.exploreRanked.length : 10}. ` : `Single‑layer start ${startMat().label} ${settings.startThickness} nm. `;
-      rl.innerHTML = `<b>${ev.reason}.</b> ${checkHtml} ${startInfo}${ev.layers.length} layers, F = ${fmt.sci(ev.F)}, RMS ${(100 * Math.sqrt(ev.F)).toFixed(3)} %${ev.dense ? ` (dense grid ${(100 * Math.sqrt(ev.dense.F)).toFixed(3)} %, max ${(100 * ev.dense.maxDev).toFixed(2)} p.p.)` : ''}, optical thickness ${ev.opticalThickness.toFixed(0)} nm.`;
-      rl.classList.toggle('good', ok);
       if (checks.length) log(failed.length ? 'check bad' : 'check', `Termination reason self‑check: ${failed.length ? `${failed.length} of ${checks.length} checks failed` : `all ${checks.length} checks passed`}.<table class="cmp"><tr><th>check</th><th>result</th><th>detail</th></tr>${checks.map((c) => `<tr><td>${c.name}</td><td>${c.ok ? '✓' : '✗'}</td><td>${c.detail || ''}</td></tr>`).join('')}</table>`);
-      log('done', `${ev.reason}. Final design: ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>${ev.dense ? `, dense‑grid F = ${fmt.sci(ev.dense.F)}` : ''}. Needles ${ev.stats.needles} (of ${ev.stats.compared} refined alternatives), growth steps ${ev.stats.growths}, thin layers removed ${ev.stats.cleanups}${ev.stats.pointsAdded ? `, grid points added ${ev.stats.pointsAdded}` : ''}, ${(ev.elapsedMs / 1000).toFixed(1)} s of computation.`);
+      const factsTable = ev.stop && ev.stop.summary ? `<table class="cmp"><tr><th>stopping condition</th><th>holds</th><th>detail</th></tr>${ev.stop.summary.facts.map((f) => `<tr class="${f.decisive ? 'chosen' : ''}"><td>${f.label}${f.decisive ? ' (decisive)' : ''}</td><td>${f.hit ? '●' : '○'}</td><td style="text-align:left">${f.text}</td></tr>`).join('')}</table>` : '';
+      log('done', `<b>${headline}.</b> ${ev.reason}. ${verdict.selectionText} Reported: ${ev.stop && ev.stop.summary ? ev.stop.summary.reported : 'final design'} — ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>${ev.dense ? `, dense‑grid F = ${fmt.sci(ev.dense.F)}` : ''}. Needles ${ev.stats.needles} (of ${ev.stats.compared} refined alternatives), growth steps ${ev.stats.growths}, thin layers removed ${ev.stats.cleanups}${ev.stats.pointsAdded ? `, grid points added ${ev.stats.pointsAdded}` : ''}, ${(ev.elapsedMs / 1000).toFixed(1)} s of computation.${factsTable}`);
       $('btn-run').textContent = 'Start synthesis'; $('btn-export').disabled = false; $('btn-step').disabled = true;
       unlockSidebar();
       break;
     }
     default: break;
   }
+}
+
+/* ---- result verdict: why the run stopped, the state of every stopping condition, why this design ---- */
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+function buildVerdict(ev) {
+  const st = ev.stop || {}, s = st.summary;
+  const checks = st.checks || [], failed = checks.filter((c) => !c.ok);
+  const checkHtml = checks.length ? (failed.length ? `<span class="check bad" title="${failed.map((c) => `${c.name} (${c.detail})`).join('; ')}">⚠ reason check failed (${failed.length} of ${checks.length})</span>` : `<span class="check" title="${checks.map((c) => c.name).join('; ')}">✓ verified (${checks.length} checks)</span>`) : '';
+  const multi = settings.startMode === 'multi' && run.exploreRanked && run.exploreRanked.length;
+  let selectionText, selectionHtml, replayMatch = null;
+  const stats = ev.stats || {};
+  const runText = `${plural(stats.cycles || 0, 'cycle')}: ${plural(stats.needles || 0, 'needle')} accepted of ${stats.compared || 0} refined alternatives, ${plural(stats.growths || 0, 'growth step')}, ${plural(stats.cleanups || 0, 'thin layer')} removed`;
+  if (multi) {
+    const ranked = run.exploreRanked, best = ranked[0], runner = ranked[1];
+    replayMatch = Math.abs(ev.F - best.F) <= 1e-9 * Math.max(1e-300, Math.abs(best.F)) && ev.layers.length === best.layers.length && ev.reason === best.reason;
+    const ratio = runner ? runner.score / Math.max(best.score, 1e-300) : null;
+    const margin = runner ? (ratio < 1.001 ? 'a tie on the score' : `${ratio >= 10 ? ratio.toFixed(0) : ratio.toFixed(2)}× higher`) : '';
+    const reachedN = ranked.filter((r) => r.score <= settings.targetMerit).length;
+    const criterion = settings.denseCheck ? 'the score max(F, F_dense)' : 'the merit F';
+    selectionText = `Chosen as the best of ${ranked.length} explored starting designs by ${criterion}: «${best.name}» ${fmt.sci(best.score)}${runner ? ` vs runner‑up «${runner.name}» ${fmt.sci(runner.score)} (${margin})` : ''}; ${reachedN ? `${reachedN} of ${ranked.length} starts reached the target merit` : 'no start reached the target merit'}. Replayed from its starting design: ${replayMatch ? 'the replay reproduced the explored result (same F, layers and termination)' : `the replay differs from the explored result (explored: F = ${fmt.sci(best.F)}, ${best.layers.length} layers)`}.`;
+    selectionHtml = `Chosen as the best of ${ranked.length} explored starting designs by ${criterion.replace('F_dense', 'F<sub>dense</sub>')}: «${best.name}» <b>${fmt.sci(best.score)}</b>${runner ? ` vs runner‑up «${runner.name}» ${fmt.sci(runner.score)} (${margin})` : ''}; ${reachedN ? `${reachedN} of ${ranked.length} starts reached the target merit` : 'no start reached the target merit'}. Replayed from its starting design — ${runText}; ${replayMatch ? '<span class="check">✓ the replay reproduced the explored result</span>' : `<span class="check bad">⚠ the replay differs from the explored result (explored: F = ${fmt.sci(best.F)}, ${best.layers.length} layers)</span>`}.`;
+  } else {
+    selectionText = `Single‑layer start ${startMat().label} ${settings.startThickness} nm — the only starting design; ${runText}.`;
+    selectionHtml = `Single‑layer start ${startMat().label} ${settings.startThickness} nm — the only starting design (Multi‑start compares ten). ${runText}.`;
+  }
+  const facts = s ? s.facts.map((f) => `<li class="${f.hit ? 'hit' : ''}${f.decisive ? ' decisive' : ''}" title="${f.decisive ? 'Decisive stopping condition. ' : f.hit ? 'This stopping condition holds. ' : 'This stopping condition does not hold. '}${f.text.replace(/"/g, '”')}"><i>${f.hit ? '●' : '○'}</i><span class="k">${f.label}</span> — <span class="t">${f.short || f.text}</span></li>`).join('') : '';
+  const numbers = `${ev.layers.length} layers, F = ${fmt.sci(ev.F)}, RMS ${(100 * Math.sqrt(ev.F)).toFixed(3)} %${ev.dense ? ` (dense grid ${(100 * Math.sqrt(ev.dense.F)).toFixed(3)} %, max ${(100 * ev.dense.maxDev).toFixed(2)} p.p.)` : ''}, optical thickness ${ev.opticalThickness.toFixed(0)} nm`;
+  const html = `<div class="line"><span class="tag stop">Stopped</span><b>${s ? s.headline : ev.reason}</b>${s ? ` — ${s.detail}` : ''}. ${checkHtml}</div>
+    ${facts ? `<ul class="facts">${facts}</ul>` : ''}
+    <div class="line"><span class="tag${multi ? ' multi' : ''}">Why this design</span>${selectionHtml}</div>
+    <div class="line"><span class="tag">Reported</span>${numbers}${s ? ` — ${s.reported}` : ''}.</div>`;
+  return { html, selectionText, replayMatch };
 }
 
 /* ------------------------------------------------------------------ */
@@ -595,14 +632,15 @@ function startExploration() {
       let bi = -1; run.ghosts.forEach((g, i) => { if (g && (bi < 0 || g.F < run.ghosts[bi].F)) bi = i; }); run.ghosts.forEach((g, i) => { if (g) g.best = i === bi; });
       spectrum.set({ ghosts: run.ghosts.filter(Boolean).map((g) => g) });
       const li = $(`explore-${ev.index}`);
-      if (li) { li.classList.remove('running'); li.querySelector('.f').textContent = `F ${fmt.sci(ev.score)}`; li.querySelector('.l').textContent = `${ev.layers.length} L`; }
-      logEntry('explore', `Start «${ev.name}»: ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>${ev.Fdense != null ? ` (dense ${fmt.sci(ev.Fdense)})` : ''}, ${ev.reason.toLowerCase()}, ${(ev.elapsedMs / 1000).toFixed(1)} s.`);
+      if (li) { li.classList.remove('running'); li.querySelector('.f').textContent = `F ${fmt.sci(ev.score)}`; li.querySelector('.l').textContent = `${ev.layers.length} L`; li.title = `${ev.summary ? ev.summary.headline + ' — ' : ''}${ev.reason}`; }
+      logEntry('explore', `Start «${ev.name}»: ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>${ev.Fdense != null ? ` (dense ${fmt.sci(ev.Fdense)})` : ''} — ${ev.summary ? ev.summary.headline.toLowerCase() : ev.reason.toLowerCase()}, ${(ev.elapsedMs / 1000).toFixed(1)} s.`);
     } else if (ev.type === 'explore-done') {
       run.exploring = false;
       if (run.worker) { run.worker.terminate(); run.worker = null; }
       const best = ev.best;
       ev.results.forEach((r, rank) => { const li = $(`explore-${r.index}`); if (li) { li.classList.toggle('best', rank === 0); if (rank === 0) li.querySelector('.n').textContent = `★ ${r.name}`; } });
-      logEntry('explore', `Best starting design: «${best.name}» (F = ${fmt.sci(best.F)}, ${best.layers.length} layers). Replaying its evolution.`);
+      const runner = ev.results[1];
+      logEntry('explore', `Best starting design by the score max(F, F<sub>dense</sub>): «${best.name}» (score ${fmt.sci(best.score)}, ${best.layers.length} layers)${runner ? `; runner‑up «${runner.name}» ${fmt.sci(runner.score)}` : ''}. Replaying its evolution from the start.`);
       run.startName = best.name; run.exploreRanked = ev.results;
       startLabel(`${ev.results.length} designs explored → winner «${best.name}» (F = ${fmt.sci(best.F)}, ${best.layers.length} layers), now replayed`, true);
       document.querySelector('#card-stats .tiles').hidden = false; $('btn-starts').hidden = false; $('explore-list').classList.remove('exploring');
@@ -722,7 +760,7 @@ function exportExcel() {
       candidates: settings.candidates, denseCheck: settings.denseCheck, enrichGrid: settings.enrichGrid,
     },
     wavelengths: grid, target, weights, R: res.R, layers: res.layers,
-    result: { F: res.F, maxDev: md, reason: res.reason || 'Intermediate design (synthesis not finished)', stats: res.stats, dense: res.dense, elapsedMs: res.elapsedMs },
+    result: { F: res.F, maxDev: md, reason: res.reason || 'Intermediate design (synthesis not finished)', stats: res.stats, dense: res.dense, elapsedMs: res.elapsedMs, summary: res.stop ? res.stop.summary : null, verified: res.stop ? res.stop.verified : null, selection: res.selection || null },
     starts: run.exploreResults,
   });
   const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -733,8 +771,8 @@ function exportExcel() {
 }
 
 function showStarts() {
-  const rows = (run.exploreRanked || []).map((r, i) => `<tr class="${i === 0 ? 'best' : ''}"><td>${i + 1}. ${r.name}</td><td>${fmt.sci(r.F)}</td><td>${r.Fdense != null ? fmt.sci(r.Fdense) : '—'}</td><td>${r.layers.length}</td><td>${r.opticalThickness.toFixed(0)}</td><td>${(r.elapsedMs / 1000).toFixed(1)}</td><td>${r.reason}</td></tr>`);
-  $('starts-table').innerHTML = `<thead><tr><th>Starting design</th><th>F</th><th>dense F</th><th>layers</th><th>nd, nm</th><th>s</th><th>termination</th></tr></thead><tbody>${rows.join('')}</tbody>`;
+  const rows = (run.exploreRanked || []).map((r, i) => `<tr class="${i === 0 ? 'best' : ''}"><td>${i === 0 ? '★ ' : ''}${i + 1}. ${r.name}</td><td>${fmt.sci(r.score)}</td><td>${fmt.sci(r.F)}</td><td>${r.Fdense != null ? fmt.sci(r.Fdense) : '—'}</td><td>${r.layers.length}</td><td>${r.opticalThickness.toFixed(0)}</td><td>${(r.elapsedMs / 1000).toFixed(1)}</td><td title="${r.reason}">${r.summary ? r.summary.headline : r.reason}</td></tr>`);
+  $('starts-table').innerHTML = `<caption>Ranked by the score max(F, F<sub>dense</sub>) — the lowest wins and is replayed on the dashboard; every start is synthesized with the same limits and budget.</caption><thead><tr><th>Starting design</th><th>score</th><th>F</th><th>dense F</th><th>layers</th><th>nd, nm</th><th>s</th><th>termination</th></tr></thead><tbody>${rows.join('')}</tbody>`;
   $('starts-dialog').showModal();
 }
 

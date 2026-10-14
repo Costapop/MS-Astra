@@ -185,6 +185,12 @@ from facts, never from the state of the reported design alone:
   budget used to replay a budget‑limited run deterministically;
 * **cycles** — cycle budget exhausted.
 
+When the layer limit leaves room for a boundary needle but not for an
+interior one, the recorded cause is the layer limit ("blocks needles inside
+the layers and the admissible boundary needles do not lower the merit"),
+never a plain "no needle lowers the merit": the search was restricted, and
+the final needle check reports whether a blocked insertion would still help.
+
 The reported design is the design at termination unless the archive holds a
 feasible design that is better by more than 0.1 % in `F` (gradual evolution
 is non‑monotonic, so the best design is often from an earlier cycle). In
@@ -194,6 +200,27 @@ termination had F = …, N layers, … nm"), so a limit named in the reason alwa
 refers to the design that hit it. The method does not guarantee a global
 minimum; the result is the outcome of a bounded local search from the chosen
 starting design.
+
+### 9a. Plain‑language summary (v2.2.2)
+
+Besides the reason sentence, the engine composes `stop.summary` from the
+same recorded facts: a **headline** naming the decisive cause (Target merit
+reached · Layer limit reached · Optical‑thickness limit reached · Needle
+variations no longer reduce the merit · No further progress · Time budget
+exhausted · Cycle budget exhausted), a **detail** sentence, the state of
+every stopping condition — target merit, layer limit, optical‑thickness
+limit, needle variations (from the final needle check), thickness growth —
+each marked as holding or not, with the decisive one flagged, and a
+**reported‑design** sentence (design at termination, or the best archived
+design with the terminal one quoted). Two more self‑checks guard it: the
+decisive condition must actually hold, and the headline must describe the
+same cause as the reason sentence. The interface shows the summary in the
+Synthesis card in the same form for a single‑layer start and for the
+replayed multi‑start winner; for the latter it adds why the design was
+chosen (lowest score `max(F, F_dense)` among the explored starts, the
+runner‑up and the margin, how many starts reached the target) and whether
+the replay reproduced the explored result. The export writes the same rows
+to the Summary sheet and ranks the Starts sheet by score.
 
 ## 10. Reference example
 

@@ -155,6 +155,7 @@ export function* synthesize(cfg) {
   let stop = null;            // structured termination cause
   let needleStop = null;      // why the last needle cycle ended: target | budget | stationary | layer-limit | no-gain | steps
   let growthCapped = false;   // the last growth step was limited by the optical-thickness bound
+  let layerLimitPartial = false;   // layer limit excluded interior needles while the admissible boundary needles gave no gain
   let noProgress = 0;
   let dc = null;
   for (let cycle = 1; cycle <= maxCycles && !stop; cycle++) {
@@ -195,7 +196,8 @@ export function* synthesize(cfg) {
       if (!scan.candidates.length) { needleStop = 'stationary'; yield { type: 'note', text: 'No negative needle derivative: the design is needle‑stationary.' }; break; }
       // admissible candidates within the layer limit
       const pool = scan.candidates.filter((c) => layers.length + (c.kind === 'interior' ? 2 : 1) <= maxLayers);
-      if (!pool.length) { needleStop = 'layer-limit'; yield { type: 'note', text: `Layer limit (${maxLayers}) reached: no further needle can be inserted into the ${layers.length}-layer design.` }; break; }
+      const blocked = scan.candidates.length - pool.length;   // candidates excluded by the layer limit
+      if (!pool.length) { needleStop = 'layer-limit'; layerLimitPartial = false; yield { type: 'note', text: `Layer limit (${maxLayers}) reached: no further needle can be inserted into the ${layers.length}-layer design.` }; break; }
       const selected = kCand > 0 ? pool.slice(0, kCand) : pool;
       const trials = [];
       for (const cand of selected) {
@@ -230,7 +232,9 @@ export function* synthesize(cfg) {
       if (!bestTrial) {
         for (const t of trials) if (t.ok) yield { type: 'needle-rejected', candidate: t.cand, why: `refined merit ${t.Fref.toExponential(3)} is not below parent ${F.toExponential(3)}` };
         stats.rejected += trials.filter((t) => t.ok).length;
-        needleStop = 'no-gain';
+        // the admissible needles give no gain; when the layer limit excluded candidates, the limit is the recorded cause
+        if (blocked) { needleStop = 'layer-limit'; layerLimitPartial = true; yield { type: 'note', text: `Layer limit (${maxLayers}): ${blocked} needle candidate${blocked > 1 ? 's' : ''} inside the layers would exceed it; the ${pool.length} admissible boundary needle${pool.length > 1 ? 's do' : ' does'} not lower the merit.` }; }
+        else needleStop = 'no-gain';
         break;
       }
       stats.needles++;
@@ -240,7 +244,7 @@ export function* synthesize(cfg) {
       const cleaned = dropZeroLayers(r2.layers, startMat);
       const Fc = evalF(cleaned);
       if (Fc < F * (1 - eps) && cleaned.length <= maxLayers) { layers = cleaned; F = Fc; keepBest(layers, F); }
-      else { stats.rejected++; needleStop = 'no-gain'; yield { type: 'needle-rejected', candidate: t.cand, why: `refined merit ${Fc.toExponential(3)} is not below parent ${F.toExponential(3)}`, layers: copy(layers), R: reflectance(layers, problem.wavelengths, ns, na), F }; break; }
+      else { stats.rejected++; needleStop = blocked ? 'layer-limit' : 'no-gain'; layerLimitPartial = blocked > 0; yield { type: 'needle-rejected', candidate: t.cand, why: `refined merit ${Fc.toExponential(3)} is not below parent ${F.toExponential(3)}`, layers: copy(layers), R: reflectance(layers, problem.wavelengths, ns, na), F }; break; }
     }
     if (stop) break;
 
@@ -277,7 +281,7 @@ export function* synthesize(cfg) {
     else if (++noProgress >= 3) stop = { kind: 'stagnation' };
   }
   if (!stop) stop = { kind: 'cycles' };
-  stop.needleStop = needleStop; stop.growthCapped = growthCapped; stop.refinements = stats.refinements;   // work done up to the stop (replay budget)
+  stop.needleStop = needleStop; stop.growthCapped = growthCapped; stop.layerLimitPartial = needleStop === 'layer-limit' && layerLimitPartial; stop.refinements = stats.refinements;   // work done up to the stop (replay budget)
   const terminal = { F, layers: layers.length, opticalThickness: totalOpticalThickness(layers), cycle: stats.cycles };
 
   // ---------------- final: cleanup + final refinement, report best ----------------
@@ -305,7 +309,7 @@ export function* synthesize(cfg) {
   // ---- compose the termination reason from the recorded facts ----
   const growthNote = stop.growthCapped ? `; thickness growth was capped by the optical‑thickness limit (${maxTOT} nm)` : '';
   const needleText = {
-    'layer-limit': `the layer limit (${maxLayers}) blocks further needles`,
+    'layer-limit': stop.layerLimitPartial ? `the layer limit (${maxLayers}) blocks needles inside the layers and the admissible boundary needles do not lower the merit` : `the layer limit (${maxLayers}) blocks further needles`,
     stationary: 'the design is needle‑stationary (g(z) ≥ 0 everywhere)',
     'no-gain': 'no needle lowers the merit after refinement',
     steps: 'the needle cycle reached its step limit',
@@ -358,9 +362,83 @@ export function* synthesize(cfg) {
         : stop.kind === 'budget' ? ' — the run stopped by its budget'
         : stop.kind === 'stagnation' && fromArchive ? ' — found for the archived design; the search had already stalled on a later design'
         : ' — the search stalled before exploiting it';
-      verdict = { kind: 'possible', text: `An insertion could still lower F by ${(100 * -b.delta).toFixed(1)} % (${b.material} at z = ${b.z.toFixed(1)} nm)${why}.` };
+      verdict = { kind: 'possible', text: `An insertion could still lower F by ${(100 * -b.delta).toFixed(1)} % (${b.material} at z = ${b.z.toFixed(1)} nm)${why}.`, blockedByLayers, gain: -b.delta, material: b.material, z: b.z };
     }
     yield { type: 'final-scan', z: scanF.z, g: scanF.g, layer: scanF.layer, total: scanF.total, candidates: scanF.candidates.slice(0, 8), trials, verdict, layers: copy(layers), F: Ff };
+
+    // ---------------- plain-language summary: decisive cause, state of every stopping condition, reported design ----------------
+    // The same structure is shown in the interface (single- and multi-start alike) and written to the export.
+    {
+      const sci = (x) => x.toExponential(2);
+      const needleStalled = stop.needleStop === 'stationary' || stop.needleStop === 'no-gain';
+      const growthDetail = `thickness growth gave no progress in three consecutive cycles${stop.growthCapped ? ' (the last step capped by the optical‑thickness limit)' : ''}`;
+      const decisive = stop.kind === 'target' ? 'target' : stop.kind === 'tot' ? 'tot' : stop.kind === 'budget' ? 'budget' : stop.kind === 'cycles' ? 'cycles'
+        : stop.needleStop === 'layer-limit' ? 'layers' : needleStalled ? 'needle' : 'growth';
+      const headline = {
+        target: reached(Ff, dcf) ? 'Target merit reached' : dcf && Ff <= targetF ? 'Target merit reached on the optimization grid only' : 'Target merit reached before the final cleanup',
+        tot: 'Optical‑thickness limit reached',
+        budget: /^Time budget/.test(budgetText()) ? 'Time budget exhausted' : 'Work budget exhausted',
+        cycles: 'Cycle budget exhausted',
+        layers: 'Layer limit reached',
+        needle: 'Needle variations no longer reduce the merit',
+        growth: stop.needleStop === 'steps' ? 'Needle cycle step limit reached' : 'No further progress',
+      }[decisive];
+      const detail = {
+        target: reached(Ff, dcf) ? `F = ${sci(Ff)} ≤ ${targetF.toExponential(0)}${dcf ? ` on the optimization grid and on the dense check grid (${sci(dcf.F)})` : ''}`
+          : dcf && Ff <= targetF ? `F = ${sci(Ff)} ≤ ${targetF.toExponential(0)} on the optimization grid, but ${sci(dcf.F)} on the dense check grid`
+          : `the target was reached before the final cleanup; after it F = ${sci(Ff)}`,
+        tot: `${terminal.opticalThickness.toFixed(0)} of ${maxTOT} nm at termination${!fromArchive && finalTOT < maxTOT - 1 ? `; after the final cleanup and refinement the reported design has ${finalTOT.toFixed(0)} nm` : ''}`,
+        budget: `${budgetText().replace(/^Time budget exhausted ?/, '').replace(/^\((.*)\)$/, '$1') || budgetText()}; ${stats.refinements} refinements, ${stats.cycles} cycles done`,
+        cycles: `${maxCycles} cycles`,
+        layers: `${terminal.layers} of ${maxLayers} layers at termination: ${stop.layerLimitPartial ? 'a needle inside a layer would exceed the limit and the boundary needles that fit do not lower the merit' : 'no further needle with a negative derivative fits within the limit'}; ${growthDetail}`,
+        needle: `${stop.needleStop === 'stationary' ? 'g(z) ≥ 0 everywhere (needle‑stationary design)' : 'no needle lowers the merit after refinement'}; ${growthDetail}`,
+        growth: growthDetail,
+      }[decisive];
+      const needleNow = verdict.kind === 'stationary' ? 'no further gain: g(z) ≥ 0 everywhere — no insertion lowers F to first order'
+        : verdict.kind === 'no-gain' ? `no further gain: ${scanF.candidates.length} negative minim${scanF.candidates.length > 1 ? 'a' : 'um'} of g(z); the ${trials.length} best tested after refinement, none lowers F (ΔF ≥ 0)`
+        : verdict.blockedByLayers ? `blocked by the layer limit: an insertion (${verdict.material} at z = ${verdict.z.toFixed(1)} nm) would lower F by ${(100 * verdict.gain).toFixed(1)} % but exceed ${maxLayers} layers`
+        : `still possible: ${verdict.text.replace(/^An insertion/, 'an insertion').replace(/\.$/, '')}`;
+      const interiorBlocked = layers.length + 2 > maxLayers;   // an interior needle adds two layers
+      const facts = [
+        { key: 'target', label: 'Target merit', hit: reached(Ff, dcf),
+          text: reached(Ff, dcf) ? `reached: F = ${sci(Ff)} ≤ ${targetF.toExponential(0)}${dcf ? ` (dense grid ${sci(dcf.F)})` : ''}`
+            : dcf && Ff <= targetF ? `F = ${sci(Ff)} ≤ ${targetF.toExponential(0)} on the optimization grid, but ${sci(dcf.F)} on the dense check grid`
+            : `not reached: F = ${sci(Ff)} > ${targetF.toExponential(0)}` },
+        { key: 'layers', label: 'Layer limit', hit: stop.needleStop === 'layer-limit' || interiorBlocked,
+          text: stop.needleStop === 'layer-limit'
+            ? `reached: ${terminal.layers} of ${maxLayers} layers at termination — ${stop.layerLimitPartial ? 'a needle inside a layer would exceed the limit; the boundary needles that fit do not lower the merit' : 'no further needle with a negative derivative fits within the limit'}${layers.length !== terminal.layers ? ` (reported design: ${layers.length} layers after the final cleanup)` : ''}`
+            : interiorBlocked ? `reached: ${layers.length} of ${maxLayers} layers — a needle inside a layer would add two layers and exceed the limit`
+            : `not reached: ${layers.length} of ${maxLayers} layers` },
+        { key: 'tot', label: 'Optical‑thickness limit', hit: stop.kind === 'tot',
+          text: stop.kind === 'tot'
+            ? `reached: ${terminal.opticalThickness.toFixed(0)} of ${maxTOT} nm at termination${finalTOT < maxTOT - 1 ? ` (reported design: ${finalTOT.toFixed(0)} nm after the final cleanup and refinement)` : ''}`
+            : `not reached: ${finalTOT.toFixed(0)} of ${maxTOT} nm` },
+        { key: 'needle', label: 'Needle variations', hit: verdict.kind !== 'possible' || !!verdict.blockedByLayers || needleStalled,
+          text: `${needleNow}${(needleStalled || stop.layerLimitPartial) && (fromArchive || finalCleanupRemoved) ? `; at termination ${stop.needleStop === 'stationary' ? 'the design was needle‑stationary' : stop.layerLimitPartial ? 'the admissible boundary needles did not lower the merit' : 'no needle lowered the merit after refinement'}` : ''}` },
+        { key: 'growth', label: 'Thickness growth', hit: stop.kind === 'stagnation' || stop.kind === 'tot' || stop.growthCapped,
+          text: stop.kind === 'stagnation' ? `no further gain: no progress in three consecutive cycles (${stats.growths} growth step${stats.growths === 1 ? '' : 's'} in the run)${stop.growthCapped ? '; the last step was capped by the optical‑thickness limit' : ''}`
+            : stop.kind === 'tot' ? `impossible: the optical thickness is at the limit (${stats.growths} growth step${stats.growths === 1 ? '' : 's'} in the run)`
+            : stop.kind === 'target' ? `not needed: the target is reached (${stats.growths} growth step${stats.growths === 1 ? '' : 's'} in the run)`
+            : `${stats.growths} growth step${stats.growths === 1 ? '' : 's'} in the run; the search stopped before growth stalled` },
+      ];
+      if (stop.kind === 'budget') facts.push({ key: 'budget', label: 'Budget', hit: true, text: `exhausted: ${budgetText().replace(/^Time budget exhausted ?/, '').replace(/^\((.*)\)$/, '$1') || budgetText()} — ${stats.refinements} refinements, ${stats.cycles} cycles` });
+      if (stop.kind === 'cycles') facts.push({ key: 'cycles', label: 'Cycle budget', hit: true, text: `exhausted: ${maxCycles} cycles` });
+      // one-line status of every condition (the full text is kept in `text`)
+      const short = {
+        target: reached(Ff, dcf) ? `reached: F = ${sci(Ff)} ≤ ${targetF.toExponential(0)}` : dcf && Ff <= targetF ? 'reached on the optimization grid only' : `not reached: F = ${sci(Ff)} > ${targetF.toExponential(0)}`,
+        layers: stop.needleStop === 'layer-limit' ? `reached: ${terminal.layers} of ${maxLayers}${stop.layerLimitPartial ? ' — boundary needles give no gain' : ''}` : interiorBlocked ? `reached: ${layers.length} of ${maxLayers} — no room for an interior needle` : `not reached: ${layers.length} of ${maxLayers}`,
+        tot: stop.kind === 'tot' ? `reached: ${terminal.opticalThickness.toFixed(0)} of ${maxTOT} nm${finalTOT < maxTOT - 1 ? ` (reported ${finalTOT.toFixed(0)} nm)` : ''}` : `not reached: ${finalTOT.toFixed(0)} of ${maxTOT} nm`,
+        needle: verdict.kind === 'stationary' ? 'no further gain: g(z) ≥ 0 everywhere' : verdict.kind === 'no-gain' ? `no further gain: ΔF ≥ 0 for the ${trials.length} best candidate${trials.length > 1 ? 's' : ''}` : verdict.blockedByLayers ? `blocked by the layer limit (−${(100 * verdict.gain).toFixed(1)} % possible)` : `still possible: −${(100 * verdict.gain).toFixed(1)} %`,
+        growth: stop.kind === 'stagnation' ? `no further gain: no progress in three cycles${stop.growthCapped ? ', last step capped' : ''}` : stop.kind === 'tot' ? 'impossible: at the thickness limit' : stop.kind === 'target' ? 'not needed: target reached' : `${stats.growths} step${stats.growths === 1 ? '' : 's'}, not stalled`,
+        budget: `exhausted: ${budgetText().replace(/^Time budget exhausted ?/, '').replace(/^\((.*)\)$/, '$1') || budgetText()}`,
+        cycles: `exhausted: ${maxCycles} cycles`,
+      };
+      for (const f of facts) { f.decisive = f.key === decisive; f.short = short[f.key]; }
+      const reported = fromArchive
+        ? `the best archived design (cycle ${fromArchive.cycle}, F = ${sci(Ff)}); the design at termination (cycle ${terminal.cycle}: F = ${sci(terminal.F)}, ${terminal.layers} layers, ${terminal.opticalThickness.toFixed(0)} nm) was worse`
+        : `the design at termination (cycle ${terminal.cycle}) after the final ${finalCleanupRemoved ? `cleanup (${finalCleanupRemoved} thin layer${finalCleanupRemoved > 1 ? 's' : ''} removed) and ` : ''}refinement`;
+      stop.summary = { decisive, headline, detail, facts, reported };
+    }
 
     // ---------------- self-check: the reported reason must be backed by the facts of the run ----------------
     const checks = [];
@@ -379,6 +457,7 @@ export function* synthesize(cfg) {
       case 'stagnation':
         chk('three cycles without progress recorded', noProgress >= 3, `${noProgress} cycles`);
         if (stop.needleStop === 'layer-limit') chk('layer limit blocks interior needles', terminal.layers >= maxLayers - 1, `${terminal.layers} of ${maxLayers} layers at termination`);
+        if (stop.layerLimitPartial && !fromArchive && !finalCleanupRemoved) chk('no admissible needle improves the reported design', trials.filter((t) => t.withinLayerLimit && t.delta != null && t.delta < -eps).length === 0, `${trials.filter((t) => t.withinLayerLimit).length} admissible of ${trials.length} tested`);
         if (stop.needleStop === 'stationary' && !fromArchive && !finalCleanupRemoved) chk('reported design is needle‑stationary', scanF.candidates.length === 0, `${scanF.candidates.length} negative minima`);
         if (stop.needleStop === 'no-gain' && !fromArchive && !finalCleanupRemoved) chk('no tested needle improves the reported design', improvingNow === 0, `${improvingNow} improving of ${trials.length} tested`);
         if (stop.growthCapped) chk('last growth step was capped by the optical‑thickness limit', stop.growthCapped, '');
@@ -391,6 +470,11 @@ export function* synthesize(cfg) {
     }
     chk('archive note present exactly when the reported design is the archived one', /best archived/.test(reason) === !!fromArchive, fromArchive ? `archived from cycle ${fromArchive.cycle}` : 'terminal design reported');
     if (fromArchive) chk('archived design is better than the terminal one', Ff < terminal.F, `${Ff.toExponential(3)} < ${terminal.F.toExponential(3)}`);
+    {
+      const d = stop.summary.facts.find((f) => f.decisive);
+      chk('summary headline names a stopping condition that actually holds', d && (d.hit || (d.key === 'target' && /only|before the final cleanup/.test(stop.summary.headline))), `${stop.summary.headline}: ${d ? d.text : 'no decisive fact'}`);
+      chk('summary and reason describe the same cause', ({ target: /^Target merit/, tot: /^Optical‑thickness limit/, budget: /budget/i, cycles: /^Cycle budget/, layers: /layer limit/, needle: /needle‑stationary|no needle lowers/, growth: /^No further progress|step limit/ })[stop.summary.decisive].test(stop.base), `${stop.summary.decisive} ↔ «${stop.base}»`);
+    }
     chk('reported design respects the limits', layers.length <= maxLayers && finalTOT <= maxTOT + 1e-6, `${layers.length} layers, ${finalTOT.toFixed(1)} nm`);
     chk('reported F equals an independent re‑evaluation', Math.abs(merit(reflectance(layers, problem.wavelengths, ns, na), problem.target, problem.weights) - Ff) <= 1e-15, '');
     stop.checks = checks; stop.verified = checks.every((c) => c.ok);
@@ -506,7 +590,7 @@ export function* explore(cfg) {
     let done = null;
     for (const ev of synthesize({ ...cfg, start: { ...s.start, name: s.name } })) if (ev.type === 'done') done = ev;
     const score = done.dense ? Math.max(done.F, done.dense.F) : done.F;
-    results.push({ index: i, name: s.name, start: s.start, F: done.F, Fdense: done.dense ? done.dense.F : null, score, layers: done.layers, opticalThickness: done.opticalThickness, reason: done.reason, baseReason: done.stop.base, stopKind: done.stop.kind, refinements: done.stop.refinements, elapsedMs: done.elapsedMs });
+    results.push({ index: i, name: s.name, start: s.start, F: done.F, Fdense: done.dense ? done.dense.F : null, score, layers: done.layers, opticalThickness: done.opticalThickness, reason: done.reason, baseReason: done.stop.base, stopKind: done.stop.kind, summary: done.stop.summary, refinements: done.stop.refinements, elapsedMs: done.elapsedMs });
     yield { type: 'explore-result', ...results[results.length - 1] };
   }
   const ranked = results.slice().sort((a, b) => a.score - b.score);
