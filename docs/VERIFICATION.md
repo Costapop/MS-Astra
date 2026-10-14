@@ -58,5 +58,8 @@ Checked in headless Chromium at 1440×900 (light and dark), 1280×720 and
 mode with no console errors; Live mode animates refinement, needle scan,
 candidate comparison, insertion, growth and cleanup; the edge filter with a
 20 nm transition zone reaches the target; multi‑start exploration runs in a
-background worker and replays the winner; Excel download (with Verification
-and Starts sheets) works; layer and starts tables open.
+background worker and replays the winner, with ghost spectra of the explored
+starts and hover highlighting; the final needle check annotates the chart with
+the verdict and the refined ΔF of the best candidates; the event log folds to
+the last five events; Excel download (with Verification and Starts sheets)
+works; layer and starts tables open.

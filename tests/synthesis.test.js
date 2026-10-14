@@ -15,7 +15,7 @@ test('anti-reflection synthesis reaches the target merit within the limits', () 
   const wl = grid(400, 700, 61);
   const cfg = { wavelengths: wl, target: new Float64Array(61).fill(0), weights: meritWeights(61), ns: 1.52, materials: { H: { n: 2.45, m: 'TiO2' }, L: { n: 1.38, m: 'MgF2' } }, start: { material: 'TiO2', thickness: 100 }, maxLayers: 12, maxOpticalThickness: 1500, targetMerit: 1e-6, thinLayer: 1 };
   const { events, done } = runAll(cfg);
-  assert.ok(done); assert.equal(done.reason, 'Target merit reached');
+  assert.ok(done); assert.match(done.reason, /^Target merit reached/);
   assert.ok(done.F <= 1e-6); assert.ok(done.layers.length <= 12); assert.ok(done.opticalThickness <= 1500 + 1e-9);
   assert.ok(done.layers.every((L) => L.d >= 1 - 1e-9), 'no layer thinner than the cleanup threshold');
   for (let i = 1; i < done.layers.length; i++) assert.notEqual(done.layers[i].m, done.layers[i - 1].m, 'adjacent layers alternate');
@@ -111,7 +111,7 @@ test('dense-grid check detects an under-resolved sparse grid and enrichment repa
   const Rd = reflectance(without.layers, dense.wavelengths, 1.52);
   assert.ok(merit(Rd, dense.target, dense.weights) > 1e-4, 'but the dense grid reveals the aliasing');
   assert.ok(withCheck.stats.pointsAdded > 0 && withCheck.grid.wavelengths.length > 5, 'grid enriched');
-  assert.equal(withCheck.reason, 'Target merit reached');
+  assert.match(withCheck.reason, /^Target merit reached/);
   assert.ok(withCheck.dense.F <= 1e-4, `dense F=${withCheck.dense.F}`);
 });
 

@@ -194,11 +194,16 @@ input.switch::after { content: ""; position: absolute; top: 2px; left: 2px; widt
 input.switch:checked { background: #34c759; }
 input.switch:checked::after { transform: translateX(16px); }
 .row input.switch { width: 40px; }
-.starts-list { list-style: none; margin: 0 16px 12px; padding: 0; font-size: 12px; flex: 1; min-height: 0; overflow: auto; }
+.starts-list { list-style: none; margin: 0 16px 8px; padding: 0; font-size: 12px; flex: none; max-height: 76px; overflow: auto; border-bottom: 1px solid var(--line); }
+.starts-list.exploring { flex: 1; min-height: 0; max-height: none; border-bottom: 0; }
 .starts-list li { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--line); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .starts-list li.best { color: var(--good); font-weight: 600; }
 .starts-list li.running { color: var(--accent); }
 .starts-list li .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swatch.ghost { width: 14px; height: 0; border-top: 2px dashed var(--series-current); background: none; }
+.starts-list li { cursor: default; }
+.starts-list li:hover { color: var(--needle); }
+.log li.folded { display: none; }
 .swatch.zone { width: 14px; height: 10px; border-radius: 3px; background: repeating-linear-gradient(135deg, var(--ink-3) 0 2px, transparent 2px 5px); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { border: 1px solid var(--line); background: var(--control); border-radius: 999px; padding: 5px 11px; font-size: 12px; cursor: pointer; color: var(--ink); }

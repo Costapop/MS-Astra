@@ -74,12 +74,7 @@
     <section class="group">
       <h2>Starting design</h2>
       <div class="rows">
-        <div class="row"><span>Mode</span>
-          <div class="segmented small" id="start-mode" role="radiogroup">
-            <button type="button" data-mode="single" role="radio" aria-checked="true" class="active">Single layer</button>
-            <button type="button" data-mode="multi" role="radio" aria-checked="false">Multi‑start</button>
-          </div>
-        </div>
+        <label class="row"><span>Multi‑start <em>10 designs in the background</em></span><input type="checkbox" class="switch" id="multi-start"></label>
         <div class="row"><span>Material</span>
           <div class="segmented small" id="start-material" role="radiogroup">
             <button type="button" data-start="H" role="radio" aria-checked="true" class="active">H</button>
@@ -127,6 +122,7 @@
           <span class="legend-item"><i class="swatch current"></i>Current R</span>
           <span class="legend-item" title="Optimization grid points on the target; hollow = zero weight, ring = added by grid enrichment"><i class="swatch grid"></i>Points</span>
           <span class="legend-item" id="legend-zone" hidden title="Zero-weight transition zone around a target jump"><i class="swatch zone"></i>Zone</span>
+          <span class="legend-item" id="legend-ghost" hidden title="Final spectra of the explored starting designs; the leader is dashed blue"><i class="swatch ghost"></i>Starts</span>
         </div>
         <div class="card-tools">
           <div class="segmented small" id="yscale"><button type="button" data-y="full" class="active">0–100 %</button><button type="button" data-y="fit">Fit</button></div>
@@ -137,6 +133,7 @@
 
     <article class="card" id="card-stats">
       <header><h3>Synthesis</h3><span class="muted" id="cycle-label">—</span><button type="button" class="link" id="btn-starts" hidden style="margin-left:auto">Starts</button></header>
+      <ol class="starts-list" id="explore-list" hidden></ol>
       <div class="tiles">
         <div class="tile"><span class="k">Merit F</span><strong id="t-merit">—</strong><span class="sub" id="t-merit-sub">mean square</span></div>
         <div class="tile"><span class="k">RMS error</span><strong id="t-rms">—</strong><span class="sub" id="t-maxdev">max —</span></div>
@@ -145,7 +142,6 @@
       </div>
       <div class="progress"><div class="bar" id="progress-bar"></div></div>
       <p class="result" id="result-line"></p>
-      <ol class="starts-list" id="explore-list" hidden></ol>
     </article>
 
     <article class="card" id="card-needle">
@@ -174,7 +170,7 @@
     </article>
 
     <article class="card" id="card-log">
-      <header><h3>Event log</h3><button type="button" class="link" id="btn-recipe">Layer table</button></header>
+      <header><h3>Event log</h3><button type="button" class="link" id="btn-log-all" hidden>Show all</button><button type="button" class="link" id="btn-recipe" style="margin-left:auto">Layer table</button></header>
       <ol class="log" id="log"></ol>
     </article>
   </section>
