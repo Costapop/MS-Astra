@@ -1,5 +1,9 @@
 # MS Astra
 
+**[Open MS Astra in your browser →](https://costapop.github.io/MS-Astra/)**
+
+No ChatGPT or GitHub account is required. The application runs directly in your browser, including synthesis and Excel export.
+
 A visual laboratory for **Gradual Evolution synthesis of multilayer optical coatings**. Draw a piecewise-constant reflectance target and watch a single layer evolve through thickness refinement, analytic needle insertion, deliberate thickness growth, cleanup, and final optimization.
 
 The English interface is designed for live demonstrations: large animated spectrum, needle-sensitivity and coating views, a merit history, presentation mode, and Excel export. Calculations run in your browser; no account, backend, external service, or runtime dependency is required.
