@@ -29,6 +29,8 @@ Use HTTP rather than opening `index.html` directly; the application uses JavaScr
 
 ## Demonstrate a synthesis
 
+The initial demonstration is a 95% reflector over **450–650 nm**, starting from 100 nm of Ta2O5 on BK7. With the supplied limits it reaches the `10⁻⁴` MSE threshold. Broader or sharper targets can need more layers, optical thickness or evolution cycles.
+
 1. Choose the low- and high-index materials, starting material, and starting geometric thickness.
 2. Set the wavelength interval and spectral sample count. Choose **Mirror**, **Edge filter**, **Anti-reflection**, or **Band reflector** as a starting target.
 3. Drag a target level vertically to change reflectance. Drag a boundary horizontally to move it in wavelength, including the two interval-end handles. **Edit target** provides numerical band editing.
@@ -39,6 +41,8 @@ Use HTTP rather than opening `index.html` directly; the application uses JavaScr
 Negative needle sensitivity identifies a promising replacement of host material. A growth step can temporarily raise the merit: this is an intentional part of Gradual Evolution. The solver retains the best feasible design found.
 
 The `.xlsx` workbook includes the target and computed spectrum, residuals, layer materials and refractive indices, geometric and optical thicknesses, run settings, and recorded evolution checkpoints. Layer 1 faces air in both the application and export.
+
+The needle chart retains the **last scanned structure** while refinement changes the current stack. Intermediate LM frames are batched for presentation; the numerical solver still evaluates every accepted step.
 
 ## Physical model
 

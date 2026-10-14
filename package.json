@@ -1,0 +1,13 @@
+{
+  "name": "ms-astra",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A visual laboratory for gradual evolution optical coating synthesis",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/serve.mjs"
+  },
+  "engines": { "node": ">=20" }
+}

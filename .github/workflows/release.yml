@@ -1,0 +1,48 @@
+name: Verify and release
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Scientific and export verification
+        run: npm test
+      - name: Build standalone application
+        run: npm run build
+  release:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build verified release source
+        run: npm run build
+      - name: Package application
+        run: |
+          cp README.md dist/README.md
+          cp -r docs dist/docs
+          cd dist
+          zip -r ../ms-astra-v1.0.0.zip .
+      - name: Publish first release if absent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v1.0.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release v1.0.0 already exists; verification completed."
+          else
+            gh release create v1.0.0 ms-astra-v1.0.0.zip --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "MS Astra 1.0 — Gradual Evolution Studio" --notes-file docs/RELEASE-v1.0.0.md
+          fi
