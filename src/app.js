@@ -9,7 +9,7 @@ import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
 
-export const VERSION = '2.1.1';
+export const VERSION = '2.1.2';
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------------ */
@@ -484,11 +484,11 @@ function applyEvent(ev, snap) {
       pushHistory(ev.F, 'done');
       if (ev.dense) run.dense = { F: ev.dense.F, maxDev: ev.dense.maxDev, points: ev.dense.wavelengths.length };
       run.problem = { grid: ev.grid.wavelengths, target: ev.grid.target, weights: ev.grid.weights };
-      updateTiles({ F: ev.F, layers: ev.layers, stage: `Finished · ${ev.reason}` });
+      updateTiles({ F: ev.F, layers: ev.layers, stage: `Finished · ${ev.reason.split(' · ')[0]}` });
       run.lastResult = { layers: ev.layers, R: ev.R, F: ev.F, reason: ev.reason, stats: ev.stats, dense: ev.dense, grid: ev.grid, elapsedMs: ev.elapsedMs };
       run.finished = true; run.running = false;
       const ok = ev.F <= settings.targetMerit && (!ev.dense || ev.dense.F <= settings.targetMerit);
-      setStage(`Finished — ${ev.reason}`, 'done');
+      setStage(`Finished — ${ev.reason.split(' · ')[0]}`, 'done'); $('stage-text').title = ev.reason;
       const rl = $('result-line');
       rl.innerHTML = `<b>${ev.reason}.</b> ${run.startName ? `Start «${run.startName}»${run.exploreRanked ? ` (best of ${run.exploreRanked.length})` : ''}. ` : ''}${ev.layers.length} layers, F = ${fmt.sci(ev.F)}, RMS ${(100 * Math.sqrt(ev.F)).toFixed(3)} %${ev.dense ? ` (dense grid ${(100 * Math.sqrt(ev.dense.F)).toFixed(3)} %, max ${(100 * ev.dense.maxDev).toFixed(2)} p.p.)` : ''}, optical thickness ${ev.opticalThickness.toFixed(0)} nm.`;
       rl.classList.toggle('good', ok);
@@ -555,7 +555,10 @@ function startExploration() {
       run.startName = best.name; run.exploreRanked = ev.results;
       document.querySelector('#card-stats .tiles').hidden = false; $('btn-starts').hidden = false; $('explore-list').classList.remove('exploring');
       view.hideCurve = false; view.curveDirty = true;
-      run.gen = synthesize({ ...run.cfg, start: { ...best.start, name: best.name } });
+      // replay deterministically: a budget-limited start is replayed with the same amount of work
+      const replayCfg = { ...run.cfg, start: { ...best.start, name: best.name } };
+      if (best.stopKind === 'budget') { replayCfg.maxRefinements = best.refinements; replayCfg.budgetReason = best.reason; }
+      run.gen = synthesize(replayCfg);
       run.holdUntil = 0;
       setStage(`Replaying the best start: ${best.name}`, 'running');
     } else if (ev.type === 'explore-error') {

@@ -128,3 +128,60 @@ test('multi-start exploration ranks the starting designs and is never worse than
   assert.ok(final.results.every((r, i) => i === 0 || r.score >= final.results[i - 1].score));
   assert.ok(final.best.layers.length <= 16 && final.best.opticalThickness <= 2600 + 1e-6);
 });
+
+/* ---------------- v2.1.2: termination reasons are consistent with the reported design ---------------- */
+import { PRESETS, bandsFromPreset, materialByKey } from '../src/config.js';
+
+function presetConfig(key, targetMerit) {
+  const p = PRESETS[key]; const bands = bandsFromPreset(p);
+  const wl = uniformGrid(p.range[0], p.range[1], 41); const s = sampleTarget(bands, wl, 0);
+  const H = materialByKey(p.H), L = materialByKey(p.L);
+  return { wavelengths: wl, target: s.target, weights: s.weights, bands, transition: 0, ns: 1.52, materials: { H: { n: H.n, m: H.key }, L: { n: L.n, m: L.key } },
+    start: { material: p.start.material, thickness: p.start.thickness }, maxLayers: Math.min(p.maxLayers, 24), maxOpticalThickness: Math.min(p.maxTOT, 3500), targetMerit, thinLayer: 1, budgetMs: 20000 };
+}
+
+test('every termination reason is backed by the recorded facts of the run', () => {
+  const seen = new Set();
+  for (const key of Object.keys(PRESETS)) for (const tm of [PRESETS[key].merit, 1e-9]) {
+    const cfg = presetConfig(key, tm);
+    const { done } = runAll(cfg);
+    const st = done.stop; seen.add(st.kind);
+    assert.ok(['target', 'tot', 'stagnation', 'budget', 'cycles'].includes(st.kind), st.kind);
+    assert.ok(done.reason.length > 10);
+    if (st.kind === 'target') {
+      assert.ok(done.F <= tm && (!done.dense || done.dense.F <= tm), `${key}: target claimed but F=${done.F}`);
+      assert.match(done.reason, /^Target merit reached/);
+    }
+    if (st.kind === 'tot') {
+      assert.ok(st.terminal.opticalThickness >= cfg.maxOpticalThickness - 1e-6, `${key}: TOT limit claimed, terminal ${st.terminal.opticalThickness}`);
+      if (!st.fromArchive) assert.ok(done.opticalThickness >= cfg.maxOpticalThickness - 1, `${key}: final TOT ${done.opticalThickness} vs limit`);
+      assert.match(done.reason, /Optical‑thickness limit reached/);
+    }
+    if (st.kind === 'stagnation') {
+      assert.match(done.reason, /^No further progress/);
+      if (st.needleStop === 'layer-limit') { assert.ok(st.terminal.layers >= cfg.maxLayers - 1); assert.match(done.reason, /layer limit/); }
+      if (st.needleStop === 'stationary') assert.match(done.reason, /needle‑stationary/);
+      if (st.needleStop === 'no-gain') assert.match(done.reason, /no needle lowers/);
+      if (st.growthCapped) assert.match(done.reason, /capped by the optical‑thickness limit/);
+    }
+    // the archive note appears exactly when the reported design is not the terminal one
+    assert.equal(/best archived/.test(done.reason), !!st.fromArchive, `${key}: archive note mismatch`);
+    if (st.fromArchive) assert.ok(done.F < st.terminal.F, 'archived design is better than the terminal one');
+    // reported numbers describe the reported design
+    assert.ok(done.layers.length <= cfg.maxLayers && done.opticalThickness <= cfg.maxOpticalThickness + 1e-6);
+  }
+  assert.ok(seen.size >= 2, `termination kinds exercised: ${[...seen]}`);
+});
+
+test('a budget-limited exploration result is replayed deterministically', () => {
+  const cfg = { ...presetConfig('mirror', 1e-9), budgetMs: 250 };
+  let final = null;
+  for (const ev of explore({ ...cfg, starts: [{ name: 'manual', start: cfg.start }] })) if (ev.type === 'explore-done') final = ev;
+  const r = final.best;
+  assert.equal(r.stopKind, 'budget', `expected a budget stop, got ${r.reason}`);
+  const replay = { ...cfg, budgetMs: Infinity, maxRefinements: r.refinements, budgetReason: r.reason, start: cfg.start };
+  const { done } = runAll(replay);
+  assert.equal(done.layers.length, r.layers.length);
+  assert.ok(Math.abs(done.F - r.F) <= 1e-15 * Math.max(1, Math.abs(r.F)) + 1e-18, `replay F=${done.F} vs ${r.F}`);
+  assert.equal(done.reason, r.reason);
+});

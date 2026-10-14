@@ -170,13 +170,30 @@ by `max(F, F_dense)` and the winner's evolution is replayed on the dashboard
 
 ## 9. Termination and result
 
-The run stops when `F ≤ F_target`, when no further needle can be inserted
-within the layer limit and growth brings no progress for three cycles, when
-the optical‑thickness limit is reached, or when the cycle budget is exhausted.
-The best feasible design seen during the run (lowest `F` within both limits)
-is retained, cleaned, refined once more and reported with the termination
-reason. The method does not guarantee a global minimum; the result is the
-outcome of a bounded local search from the chosen starting layer.
+The run records a structured stop cause and composes the reported reason
+from facts, never from the state of the reported design alone:
+
+* **target** — `F ≤ F_target` on the optimization grid and on the dense grid,
+  re‑verified on the final design after cleanup and final refinement;
+* **tot** — the design at termination has `Σ n_j d_j ≥ TOT_max` (growth is
+  impossible);
+* **stagnation** — three cycles without a 10⁻⁴ relative improvement; the
+  text names why the last needle cycle ended (layer limit blocks insertion,
+  needle‑stationary design, or no candidate lowers F after refinement) and
+  whether growth was capped by the optical‑thickness limit;
+* **budget** — time budget (multi‑start exploration) or an explicit work
+  budget used to replay a budget‑limited run deterministically;
+* **cycles** — cycle budget exhausted.
+
+The reported design is the design at termination unless the archive holds a
+feasible design that is better by more than 0.1 % in `F` (gradual evolution
+is non‑monotonic, so the best design is often from an earlier cycle). In
+that case the reason says so explicitly and quotes both designs
+("reported design is the best archived one (cycle k, F = …); the design at
+termination had F = …, N layers, … nm"), so a limit named in the reason always
+refers to the design that hit it. The method does not guarantee a global
+minimum; the result is the outcome of a bounded local search from the chosen
+starting design.
 
 ## 10. Reference example
 
