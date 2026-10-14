@@ -174,14 +174,17 @@ test('every termination reason is backed by the recorded facts of the run', () =
 });
 
 test('a budget-limited exploration result is replayed deterministically', () => {
-  const cfg = { ...presetConfig('mirror', 1e-9), budgetMs: 250 };
-  let final = null;
-  for (const ev of explore({ ...cfg, starts: [{ name: 'manual', start: cfg.start }] })) if (ev.type === 'explore-done') final = ev;
-  const r = final.best;
-  assert.equal(r.stopKind, 'budget', `expected a budget stop, got ${r.reason}`);
-  const replay = { ...cfg, budgetMs: Infinity, maxRefinements: r.refinements, budgetReason: r.reason, start: cfg.start };
-  const { done } = runAll(replay);
-  assert.equal(done.layers.length, r.layers.length);
-  assert.ok(Math.abs(done.F - r.F) <= 1e-15 * Math.max(1, Math.abs(r.F)) + 1e-18, `replay F=${done.F} vs ${r.F}`);
-  assert.equal(done.reason, r.reason);
+  // work budget (deterministic) and a wall-clock budget (as used by the interface): both must replay exactly
+  for (const budget of [{ maxRefinements: 23 }, { budgetMs: 200 }]) {
+    const cfg = { ...presetConfig('mirror', 1e-9), ...budget };
+    let final = null;
+    for (const ev of explore({ ...cfg, starts: [{ name: 'manual', start: cfg.start }] })) if (ev.type === 'explore-done') final = ev;
+    const r = final.best;
+    assert.equal(r.stopKind, 'budget', `expected a budget stop, got ${r.reason}`);
+    const replay = { ...cfg, budgetMs: Infinity, maxRefinements: r.refinements, budgetReason: r.baseReason, start: cfg.start };
+    const { done } = runAll(replay);
+    assert.equal(done.layers.length, r.layers.length);
+    assert.ok(Math.abs(done.F - r.F) <= 1e-15 * Math.max(1, Math.abs(r.F)) + 1e-18, `replay F=${done.F} vs ${r.F}`);
+    assert.equal(done.reason, r.reason);
+  }
 });

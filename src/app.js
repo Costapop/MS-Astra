@@ -9,7 +9,7 @@ import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
 
-export const VERSION = '2.1.2';
+export const VERSION = '2.1.3';
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------------ */
@@ -557,7 +557,7 @@ function startExploration() {
       view.hideCurve = false; view.curveDirty = true;
       // replay deterministically: a budget-limited start is replayed with the same amount of work
       const replayCfg = { ...run.cfg, start: { ...best.start, name: best.name } };
-      if (best.stopKind === 'budget') { replayCfg.maxRefinements = best.refinements; replayCfg.budgetReason = best.reason; }
+      if (best.stopKind === 'budget') { replayCfg.maxRefinements = best.refinements; replayCfg.budgetReason = best.baseReason; }
       run.gen = synthesize(replayCfg);
       run.holdUntil = 0;
       setStage(`Replaying the best start: ${best.name}`, 'running');
