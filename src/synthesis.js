@@ -187,7 +187,7 @@ export function* synthesize(cfg) {
     needleStop = 'steps';
     for (let needleStep = 0; needleStep < 200; needleStep++) {
       if (F <= targetF && (!dc || dc.F <= targetF)) { needleStop = 'target'; break; }
-      if (overBudget()) { needleStop = 'budget'; break; }
+      if (overBudget()) { needleStop = 'budget'; stop = { kind: 'budget' }; break; }   // stop immediately: no further design change after a budget stop
       yield { type: 'stage', stage: 'needle' };
       const ev = evaluate(layers, problem.wavelengths, problem.target, problem.weights, ns, na, true);
       const scan = scanNeedles(layers, ev.adjoint, problem.wavelengths, other);
@@ -242,6 +242,7 @@ export function* synthesize(cfg) {
       if (Fc < F * (1 - eps) && cleaned.length <= maxLayers) { layers = cleaned; F = Fc; keepBest(layers, F); }
       else { stats.rejected++; needleStop = 'no-gain'; yield { type: 'needle-rejected', candidate: t.cand, why: `refined merit ${Fc.toExponential(3)} is not below parent ${F.toExponential(3)}`, layers: copy(layers), R: reflectance(layers, problem.wavelengths, ns, na), F }; break; }
     }
+    if (stop) break;
 
     // ---------------- thin-layer cleanup ----------------
     if (layers.some((L) => L.d < dMin) && layers.length > 1) {
@@ -322,6 +323,7 @@ export function* synthesize(cfg) {
     case 'stagnation': reason = `No further progress in three cycles: ${needleText}${growthNote}`; break;
     default: reason = `Cycle budget exhausted (${maxCycles} cycles)`;
   }
+  stop.base = reason;
   if (fromArchive) reason += ` · reported design is the best archived one (cycle ${fromArchive.cycle}, F = ${Ff.toExponential(2)}); the design at termination had F = ${terminal.F.toExponential(2)}, ${terminal.layers} layers, ${terminal.opticalThickness.toFixed(0)} nm`;
   stop.text = reason; stop.fromArchive = fromArchive; stop.terminal = terminal;
 
@@ -468,7 +470,7 @@ export function* explore(cfg) {
     let done = null;
     for (const ev of synthesize({ ...cfg, start: { ...s.start, name: s.name } })) if (ev.type === 'done') done = ev;
     const score = done.dense ? Math.max(done.F, done.dense.F) : done.F;
-    results.push({ index: i, name: s.name, start: s.start, F: done.F, Fdense: done.dense ? done.dense.F : null, score, layers: done.layers, opticalThickness: done.opticalThickness, reason: done.reason, stopKind: done.stop.kind, refinements: done.stop.refinements, elapsedMs: done.elapsedMs });
+    results.push({ index: i, name: s.name, start: s.start, F: done.F, Fdense: done.dense ? done.dense.F : null, score, layers: done.layers, opticalThickness: done.opticalThickness, reason: done.reason, baseReason: done.stop.base, stopKind: done.stop.kind, refinements: done.stop.refinements, elapsedMs: done.elapsedMs });
     yield { type: 'explore-result', ...results[results.length - 1] };
   }
   const ranked = results.slice().sort((a, b) => a.score - b.score);
