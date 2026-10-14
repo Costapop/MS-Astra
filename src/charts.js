@@ -84,7 +84,7 @@ export class SpectrumChart extends Plot {
   constructor(canvas, tooltip) {
     super(canvas, { l: 66, r: 18, t: 26, b: 34 });
     this.tooltip = tooltip;
-    this.state = { lambdaMin: 400, lambdaMax: 700, bands: [], grid: null, target: null, R: null, weights: null, added: null, curve: null, transition: 0, yMode: 'full', editable: true, ghosts: [], ghostHighlight: null };
+    this.state = { lambdaMin: 400, lambdaMax: 700, bands: [], grid: null, target: null, R: null, weights: null, added: null, curve: null, curveDashed: false, transition: 0, yMode: 'full', editable: true, ghosts: [], ghostHighlight: null };
     this.onChange = null;      // (patch) => void
     this.hover = null; this.drag = null;
     const c = canvas;
@@ -244,8 +244,8 @@ export class SpectrumChart extends Plot {
         ctx.beginPath();
         for (let k = 0; k < gh.wl.length; k++) { const x = xs(gh.wl[k]), y = ys(gh.R[k]); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
         if (hl) { ctx.strokeStyle = T.needle; ctx.lineWidth = 2.5; ctx.globalAlpha = 1; ctx.setLineDash([]); }
-        else if (gh.best) { ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2; ctx.globalAlpha = 0.75; ctx.setLineDash([6, 4]); }
-        else { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 1.2; ctx.globalAlpha = 0.4; ctx.setLineDash([]); }
+        else if (gh.best) { ctx.strokeStyle = T.good; ctx.lineWidth = 1.8; ctx.globalAlpha = 0.85; ctx.setLineDash([6, 4]); }
+        else { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 1.2; ctx.globalAlpha = 0.45; ctx.setLineDash([4, 4]); }
         ctx.stroke(); ctx.globalAlpha = 1; ctx.setLineDash([]);
       }
       const hl = s.ghostHighlight != null ? s.ghosts[s.ghostHighlight] : null;
@@ -261,9 +261,13 @@ export class SpectrumChart extends Plot {
     if (cw && cR) {
       ctx.beginPath();
       for (let i = 0; i < cw.length; i++) { const x = xs(cw[i]), y = ys(cR[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
-      ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2.25; ctx.lineJoin = 'round'; ctx.stroke();
-      ctx.lineTo(xs(cw[cw.length - 1]), ys(y0)); ctx.lineTo(xs(cw[0]), ys(y0)); ctx.closePath();
-      ctx.fillStyle = T['series-current-fill']; ctx.fill();
+      ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2.25; ctx.lineJoin = 'round';
+      if (s.curveDashed) { ctx.setLineDash([7, 5]); ctx.stroke(); ctx.setLineDash([]); }
+      else {
+        ctx.stroke();
+        ctx.lineTo(xs(cw[cw.length - 1]), ys(y0)); ctx.lineTo(xs(cw[0]), ys(y0)); ctx.closePath();
+        ctx.fillStyle = T['series-current-fill']; ctx.fill();
+      }
     }
     // target: thick step line
     ctx.strokeStyle = T['series-target']; ctx.lineWidth = 3; ctx.lineCap = 'round';

@@ -58,8 +58,11 @@ Checked in headless Chromium at 1440×900 (light and dark), 1280×720 and
 mode with no console errors; Live mode animates refinement, needle scan,
 candidate comparison, insertion, growth and cleanup; the edge filter with a
 20 nm transition zone reaches the target; multi‑start exploration runs in a
-background worker and replays the winner, with ghost spectra of the explored
-starts and hover highlighting; the final needle check annotates the chart with
+background worker whose stages are streamed and animated on the charts
+(dashed spectrum, structure, needle derivative), then replays the winner over
+the ghost spectra of the explored starts with hover highlighting; the
+Presets and Target tabs of the spectrum card edit the task; the elapsed‑time
+counter runs through exploration and replay; the final needle check annotates the chart with
 the verdict and the refined ΔF of the best candidates; the event log folds to
 the last five events; Excel download (with Verification and Starts sheets)
 works; layer and starts tables open.

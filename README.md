@@ -31,18 +31,20 @@ evidence: [docs/VERIFICATION.md](docs/VERIFICATION.md).
 
 ## Using the dashboard
 
-1. Pick a **target preset** or draw your own target on the reflectance chart:
-   drag a level up or down, drag a boundary (or a range end) left or right,
-   double‑click a band to split it, double‑click a boundary to merge. The same
-   values are editable numerically in the sidebar.
-2. Set the spectral range, the number of spectral points, an optional
-   transition zone around target jumps (points inside it get zero weight),
-   the H and L materials, the substrate, the starting design (a single layer,
-   or **Multi‑start**: ten starting designs are synthesized in the
-   background and the best is replayed) and the limits: maximum number of
-   layers, maximum total optical thickness and the target merit
-   `F = ⟨(R − R̃)²⟩`. Advanced: the number of needle candidates compared per
-   step, the dense‑grid check and automatic grid enrichment.
+1. Pick a **target preset** on the *Presets* tab of the Reflectance spectrum
+   card, or draw your own target on the chart: drag a level up or down, drag
+   a boundary (or a range end) left or right, double‑click a band to split
+   it, double‑click a boundary to merge. The *Target* tab holds the same
+   values numerically together with the spectral range, the number of points
+   and the transition zone around target jumps (points inside it get zero
+   weight).
+2. In the sidebar set the H and L materials, the substrate, the starting
+   design (a single layer, or **Multi‑start**: ten starting designs are
+   synthesized in the background and watched on the charts, then the best is
+   replayed) and the limits: maximum number of layers, maximum total optical
+   thickness and the target merit `F = ⟨(R − R̃)²⟩`. Advanced: the number of
+   needle candidates compared per step, the dense‑grid check and automatic
+   grid enrichment.
 3. Press **Start synthesis**. The pace control (Cinematic / Live / Fast /
    Instant) sets how long each stage is held on screen; **Step** advances to
    the next event, Space pauses and resumes.
@@ -82,6 +84,6 @@ Serve the files over HTTP (the application uses JavaScript modules).
 - `src/xlsx.js` — dependency‑free Excel writer.
 - `tests/` — verification against closed forms, an independent matrix code, finite differences, the specification's worked example and the book's designs.
 
-Release notes: [docs/RELEASE-v2.1.3.md](docs/RELEASE-v2.1.3.md), [v2.1.1](docs/RELEASE-v2.1.1.md), [v2.1.0](docs/RELEASE-v2.1.0.md), [v2.0.0](docs/RELEASE-v2.0.0.md). The source
+Release notes: [docs/RELEASE-v2.2.0.md](docs/RELEASE-v2.2.0.md), [v2.1.3](docs/RELEASE-v2.1.3.md), [v2.1.1](docs/RELEASE-v2.1.1.md), [v2.1.0](docs/RELEASE-v2.1.0.md), [v2.0.0](docs/RELEASE-v2.0.0.md). The source
 books and the private method specification are not distributed with this
 repository.

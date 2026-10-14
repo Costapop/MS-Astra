@@ -38,30 +38,6 @@
 <main class="layout">
   <aside class="sidebar" id="sidebar">
     <section class="group">
-      <h2>Target preset</h2>
-      <div class="chips" id="presets"></div>
-    </section>
-
-    <section class="group">
-      <h2>Spectral range</h2>
-      <div class="rows">
-        <label class="row"><span>Minimum wavelength <em>nm</em></span><input type="number" id="lambda-min" min="100" step="1"></label>
-        <label class="row"><span>Maximum wavelength <em>nm</em></span><input type="number" id="lambda-max" min="100" step="1"></label>
-        <label class="row"><span>Spectral points</span><input type="number" id="points" min="2" max="2000" step="1"></label>
-      </div>
-    </section>
-
-    <section class="group">
-      <h2>Target reflectance</h2>
-      <p class="hint">Drag levels and boundaries on the chart, double‑click a band to split it, double‑click a boundary to merge. Values are editable here too.</p>
-      <div class="bands" id="bands"></div>
-      <div class="rows">
-        <label class="row"><span>Transition zone at jumps <em>nm</em></span><input type="number" id="transition" min="0" step="1"></label>
-      </div>
-      <p class="hint">Spectral points closer than half the zone width to a target jump get zero weight: an ideal edge cannot be matched and would otherwise dominate the merit.</p>
-    </section>
-
-    <section class="group">
       <h2>Materials</h2>
       <div class="rows">
         <label class="row"><span>High index <em>H</em></span><select id="mat-h"></select></label>
@@ -117,22 +93,52 @@
     <article class="card" id="card-spectrum">
       <header>
         <h3>Reflectance spectrum</h3>
-        <div class="legend">
+        <div class="segmented small tabs" id="spectrum-tabs" role="tablist">
+          <button type="button" data-tab="chart" role="tab" aria-selected="true" class="active">Chart</button>
+          <button type="button" data-tab="presets" role="tab" aria-selected="false">Presets</button>
+          <button type="button" data-tab="target" role="tab" aria-selected="false">Target</button>
+        </div>
+        <div class="legend" id="spectrum-legend">
           <span class="legend-item"><i class="swatch target"></i>Target R̃</span>
           <span class="legend-item"><i class="swatch current"></i>Current R</span>
           <span class="legend-item" title="Optimization grid points on the target; hollow = zero weight, ring = added by grid enrichment"><i class="swatch grid"></i>Points</span>
           <span class="legend-item" id="legend-zone" hidden title="Zero-weight transition zone around a target jump"><i class="swatch zone"></i>Zone</span>
-          <span class="legend-item" id="legend-ghost" hidden title="Final spectra of the explored starting designs; the leader is dashed blue"><i class="swatch ghost"></i>Starts</span>
+          <span class="legend-item" id="legend-ghost" hidden title="Multi‑start: the start being explored is dashed blue, finished starts are dashed grey, the leader dashed green"><i class="swatch ghost"></i>Starts</span>
         </div>
-        <div class="card-tools">
+        <div class="card-tools" id="spectrum-tools">
           <div class="segmented small" id="yscale"><button type="button" data-y="full" class="active">0–100 %</button><button type="button" data-y="fit">Fit</button></div>
         </div>
       </header>
-      <div class="plot"><canvas id="spectrum"></canvas><div class="tooltip" id="tt-spectrum" hidden></div></div>
+      <div class="plot" id="tab-chart"><canvas id="spectrum"></canvas><div class="tooltip" id="tt-spectrum" hidden></div></div>
+      <div class="panel settings-panel" id="tab-presets" hidden>
+        <div class="panel-col">
+          <h4>Target presets</h4>
+          <p class="hint">A preset sets the spectral range, the target bands, the materials, the starting layer and the limits. Edit anything afterwards on the Target tab or in the sidebar.</p>
+          <div class="chips" id="presets"></div>
+        </div>
+        <div class="panel-col" id="preset-summary"></div>
+      </div>
+      <div class="panel settings-panel" id="tab-target" hidden>
+        <div class="panel-col">
+          <h4>Spectral range</h4>
+          <div class="rows">
+            <label class="row"><span>Minimum wavelength <em>nm</em></span><input type="number" id="lambda-min" min="100" step="1"></label>
+            <label class="row"><span>Maximum wavelength <em>nm</em></span><input type="number" id="lambda-max" min="100" step="1"></label>
+            <label class="row"><span>Spectral points</span><input type="number" id="points" min="2" max="2000" step="1"></label>
+            <label class="row"><span>Transition zone at jumps <em>nm</em></span><input type="number" id="transition" min="0" step="1"></label>
+          </div>
+          <p class="hint">Spectral points closer than half the zone width to a target jump get zero weight: an ideal edge cannot be matched and would otherwise dominate the merit.</p>
+        </div>
+        <div class="panel-col">
+          <h4>Target reflectance bands</h4>
+          <p class="hint">Edit the values here, or on the chart: drag a level or a boundary, double‑click a band to split it, double‑click a boundary to merge.</p>
+          <div class="bands" id="bands"></div>
+        </div>
+      </div>
     </article>
 
     <article class="card" id="card-stats">
-      <header><h3>Synthesis</h3><span class="muted" id="cycle-label">—</span><button type="button" class="link" id="btn-starts" hidden style="margin-left:auto">Starts</button></header>
+      <header><h3>Synthesis</h3><span class="muted" id="cycle-label">—</span><span class="timer" id="t-elapsed" title="Elapsed synthesis time (pauses with the run)">0:00.0</span><button type="button" class="link" id="btn-starts" hidden>Starts</button></header>
       <ol class="starts-list" id="explore-list" hidden></ol>
       <div class="tiles">
         <div class="tile"><span class="k">Merit F</span><strong id="t-merit">—</strong><span class="sub" id="t-merit-sub">mean square</span></div>
