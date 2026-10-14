@@ -1,0 +1,112 @@
+/* Engineering workspace: the spectrum owns the canvas; diagnostics stay in view. */
+:root{--ink:#24344b;--muted:#64748b;--line:#dce3ed;background:#eef2f7;color:var(--ink)}
+body{font-variant-numeric:tabular-nums}
+.toolbar{height:58px;padding:0 20px;background:#fff;border-bottom:1px solid #dce3ed;backdrop-filter:none}
+.brand{font-size:23px;gap:9px}.brand-mark{font-size:37px}.brand-sub{display:none}
+.toolbar nav{gap:16px}.toolbar .secondary{font-size:15px;padding:8px 12px;background:#fbfcfe;border-radius:8px}
+.toolbar .text-button{font-size:15px}#designSummary{font-size:14px;margin-left:10px}
+.studio{height:calc(100dvh - 58px);min-height:650px;max-width:2400px;padding:12px 16px;gap:12px}
+.panel{border:1px solid #dce3ed;border-radius:12px;box-shadow:0 2px 8px #24344b03}
+.run-bar{padding:10px 12px;min-height:66px;gap:18px;background:#fafcff;border-radius:10px}
+.primary{font-size:16px;padding:12px 17px;border-radius:8px;background:#2667dc;box-shadow:0 2px 5px #1d4ed11a}
+.icon-button{height:43px;width:39px;border-radius:8px}.run-action{gap:7px}
+.run-description{min-width:0}.run-description strong{font-size:16px;font-weight:650;white-space:nowrap}
+.run-status-line{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.run-description>span{font-size:14px;line-height:1.35;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.speed-control{font-size:14px;gap:8px}.speed-control select{height:40px;width:110px;font-size:15px}
+.stage-track{gap:4px;max-width:none;flex-shrink:0}.stage-track>span{font-size:13px;padding:3px 5px;gap:4px;border-radius:5px}
+.stage-track i{height:18px;width:18px;font-size:11px}.stage-track>span.active{background:#e4edff;color:#215ab7}
+.dashboard{display:grid;grid-template-columns:minmax(0,1fr) 330px;grid-template-rows:minmax(360px,1fr) 154px;gap:12px;flex:1;min-height:0}
+.dashboard>.panel,.diagnostics>.panel{padding:14px 18px 10px;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+.spectrum-panel{grid-column:1;grid-row:1;border-color:#cbd7e7;box-shadow:0 3px 12px #30456805}
+.diagnostics{grid-column:2;grid-row:1;display:grid;grid-template-rows:1.12fr 1fr;gap:12px;min-width:0;min-height:0}
+.diagnostics>.panel{padding:12px 14px 9px}
+.structure-panel{grid-column:1;grid-row:2}.telemetry-panel{grid-column:2;grid-row:2}
+.card-heading{gap:12px;flex-shrink:0}.spectrum-panel h1{font-size:25px;font-weight:650;letter-spacing:-.7px}
+.chart-unit{font-size:17px;font-weight:500;color:#8090a5;margin-left:7px;letter-spacing:0}
+.legend{gap:24px;font-size:16px}.line{width:30px}.line.target{border-top-width:5px}.line.achieved{border-top-width:3px}
+.spectrum-controls{margin:10px 0 7px;gap:12px;flex-wrap:nowrap}
+.range-inputs,.range-inputs label{font-size:14px;gap:7px}.range-inputs input{height:33px;width:78px;font-size:16px;background:#fff}
+.scale-button{padding:7px 10px;margin-left:6px;font-size:13px;font-weight:550;border:1px solid #dbe3ed;border-radius:6px;background:#f8faff;color:#42658d;white-space:nowrap}
+.scale-button[aria-pressed=true]{background:#e9f1ff;border-color:#b4cbef;color:#2462bd}
+.preset-tabs{padding:2px;border-color:#e0e6ee;background:#f2f5f9;border-radius:7px}
+.preset-tabs button{padding:6px 10px;font-size:14px;border-radius:5px}
+.spectrum-plot{flex:1;min-height:0}.spectrum-plot svg{cursor:crosshair}
+.plot-footer{min-height:29px;padding-top:6px;border-top:1px solid #e5eaf2;font-size:14px;gap:12px}
+.plot-footer .text-button{font-size:14px;padding:3px 0}.plot-footer>span{max-width:none}
+.plot-label{fill:#52637a;font-weight:450}.axis-label{fill:#53647b;letter-spacing:.2px}
+.plot-tooltip{z-index:3;box-shadow:0 5px 24px #263b5b14;min-width:185px;font-size:14px;line-height:1.65}
+.needle-panel h2,.history-panel h2,.structure-panel h2{font-size:18px;letter-spacing:-.35px}
+.diagnostics .text-button{font-size:13px}.needle-panel .card-heading{flex-wrap:nowrap;gap:6px}
+.needle-panel .pill{font-size:12px;padding:3px 5px;max-width:145px;overflow:hidden;text-overflow:ellipsis}
+.chart-subtitle,.chart-caption{font-size:13px;line-height:1.3;margin-top:4px}
+.history-panel .chart-caption{font-size:12px}.needle-panel .chart-subtitle{display:none}
+.needle-panel>svg,.history-panel>svg{flex:1;height:100%;min-height:0;width:100%}
+.needle-panel .chart-caption{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.structure-panel .material-legend{font-size:14px;gap:14px}.structure-panel .text-button{font-size:14px;padding:1px 0}
+.stack-container{margin-top:5px;gap:20px;min-height:0;flex-direction:row}.stack-overview{justify-content:center}
+.stack-labels{font-size:12px;margin-bottom:4px}.stack-labels span span{font-size:12px}
+.stack-visual{height:39px;min-height:30px;max-height:44px;margin-bottom:4px}.layer span{font-size:14px}
+.stack-axis{font-size:12px}.stack-selection{font-size:13px;margin-top:3px;min-height:16px;line-height:1.15}
+.insertion-focus{width:35%;max-width:340px;min-width:230px;padding-left:16px;border-left:1px solid #e3e7f0;border-top:0;gap:5px}
+.focus-heading{font-size:14px}.focus-strip{height:34px}.focus-caption{font-size:13px;line-height:1.3}
+.telemetry-panel .metrics{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:10px 20px;flex:1}
+.metrics span{font-size:12px;white-space:nowrap;font-weight:550;color:#5f7086;letter-spacing:.1px}
+.metrics strong{font-size:25px;line-height:1.1;letter-spacing:-.7px;margin:2px 0}.metrics em{font-size:13px;letter-spacing:0}
+.metrics small{font-size:12px;white-space:nowrap;color:#718198}.metrics>div{position:relative}
+.metrics>div:nth-child(1)::before{content:'';position:absolute;left:-9px;top:2px;bottom:3px;width:2px;background:#4581e7;border-radius:2px}
+.presenting .toolbar{height:58px}.presenting .studio{height:calc(100dvh - 58px);min-height:650px}
+.presenting .dashboard{grid-template-rows:minmax(360px,1fr) 154px}.presenting .spectrum-panel h1{font-size:25px}
+.presenting .spectrum-plot{margin-top:12px}
+@media(min-width:1600px){
+  .dashboard{grid-template-columns:minmax(0,1fr) 380px;grid-template-rows:minmax(400px,1fr) 180px;gap:16px}
+  .studio{padding:16px 22px;gap:14px}.diagnostics{gap:16px}.dashboard>.panel{padding:18px 22px 12px}
+  .diagnostics>.panel{padding:16px 18px 12px}.spectrum-panel h1{font-size:29px}
+  .needle-panel h2,.history-panel h2,.structure-panel h2{font-size:21px}
+  .stack-visual{height:52px;max-height:60px}.focus-strip{height:45px}.stack-selection,.focus-caption{font-size:15px}
+  .metrics span{font-size:14px}.metrics strong{font-size:29px}.metrics small{font-size:12px}
+  .presenting .dashboard{grid-template-rows:minmax(400px,1fr) 180px}
+}
+@media(max-width:1250px) and (min-width:1000px){
+  .toolbar nav{gap:12px}.toolbar #designSummary{display:none}.dashboard{grid-template-columns:minmax(0,1fr) 300px;gap:10px}
+  .studio{padding:10px 12px;gap:10px}.run-bar{gap:12px;padding:9px 10px}.run-status-line{gap:8px}
+  .stage-track{gap:1px}.stage-track i{display:none}.stage-track>span{font-size:12px;padding:4px 3px}
+  .run-description strong{font-size:15px}.speed-control{flex-direction:column;gap:2px;font-size:11px}.speed-control select{height:32px;width:100px;font-size:14px}
+  .primary{font-size:15px;padding:12px}.icon-button{width:35px}.dashboard>.panel{padding:12px 14px 9px}
+  .spectrum-panel h1{font-size:22px}.chart-unit{display:none}.spectrum-controls{gap:7px}.preset-tabs button{font-size:12px;padding:6px}
+  .range-inputs,.range-inputs label{font-size:13px;gap:5px}.range-inputs input{width:65px;font-size:15px}
+  .scale-button{font-size:12px;padding:6px 7px;margin-left:1px}
+  .legend{font-size:14px;gap:14px}.insertion-focus{min-width:190px;padding-left:12px}.stack-container{gap:12px}
+  .metrics strong{font-size:24px}.metrics small{font-size:12px}.metrics span{font-size:12px}
+}
+@media(max-width:999px){
+  .toolbar{height:auto;min-height:58px;padding:12px 16px}.toolbar nav{gap:9px}.brand-sub{display:none}
+  .studio,.presenting .studio{height:auto;min-height:0;padding:12px;gap:12px}
+  .run-bar{flex-wrap:wrap}.run-description{order:3;flex-basis:100%}.run-status-line{gap:12px}.run-description>span{white-space:normal}
+  .dashboard,.presenting .dashboard{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:520px 280px 185px;gap:12px}
+  .spectrum-panel{grid-column:1/-1;grid-row:1}.diagnostics{grid-column:1/-1;grid-row:2;grid-template-columns:1fr 1fr;grid-template-rows:1fr}
+  .needle-panel,.history-panel{grid-column:auto;grid-row:auto}.structure-panel{grid-column:1;grid-row:3}.telemetry-panel{grid-column:2;grid-row:3}
+  .spectrum-controls{flex-wrap:wrap}.structure-panel .card-heading{flex-wrap:nowrap}.structure-panel .material-legend>span{display:none}
+  .stack-container{flex-direction:row}.insertion-focus{min-width:140px;padding-left:10px;width:45%}.focus-heading,.focus-caption{font-size:12px}
+  .metrics span{font-size:13px}.metrics strong{font-size:28px}.metrics small{font-size:12px}.telemetry-panel .metrics{gap:15px 20px}
+  .spectrum-panel h1{font-size:25px}.needle-panel h2,.history-panel h2{font-size:19px}.plot-footer>span{max-width:none}
+}
+@media(max-width:600px){
+  .toolbar{padding:12px}.toolbar nav{width:100%;gap:6px}.toolbar .secondary{font-size:14px;padding:8px 9px}
+  .studio,.presenting .studio{padding:9px}.run-action{gap:5px}.primary{padding:12px;font-size:15px}.icon-button{width:34px}
+  .run-bar{padding:10px;gap:9px}.speed-control{font-size:12px;gap:5px}.speed-control select{width:92px;font-size:14px}
+  .run-status-line{flex-direction:column;align-items:start;gap:7px}.stage-track{width:100%;justify-content:space-between}
+  .stage-track>span{font-size:13px;padding:2px}.stage-track i{display:none}.run-description>span{font-size:13px}
+  .dashboard,.presenting .dashboard{display:flex;flex-direction:column;gap:12px}
+  .dashboard>.spectrum-panel{height:490px;padding:14px 12px 10px}.dashboard>.structure-panel{height:235px;min-height:0;order:2}
+  .diagnostics{display:grid;grid-template-columns:1fr;grid-template-rows:265px 245px;gap:12px;order:3}
+  .diagnostics>.panel{height:auto}.dashboard>.telemetry-panel{height:170px;order:4}
+  .dashboard>.panel{padding:14px}.spectrum-panel h1{font-size:20px}.chart-unit{display:none}.legend{font-size:13px;gap:10px}.line{width:20px}
+  .spectrum-controls{gap:9px;margin:10px 0 7px}.preset-tabs{width:100%;justify-content:space-between}.preset-tabs button{font-size:13px;padding:6px 7px}
+  .range-inputs input{width:78px;height:33px}.plot-footer{align-items:center;font-size:12px;gap:10px}.plot-footer>span{max-width:70%;line-height:1.35}
+  .plot-footer .text-button{font-size:13px}.stack-container{margin-top:9px;flex-direction:column;gap:9px}
+  .insertion-focus{width:100%;min-width:0;max-width:none;border:0;border-top:1px solid var(--line);padding:9px 0 0;gap:6px}
+  .focus-strip{height:34px}.focus-heading,.focus-caption{font-size:13px}.stack-visual{min-height:35px;max-height:42px}
+  .telemetry-panel .metrics{gap:12px 25px;padding:0}.metrics span{font-size:13px}.metrics strong{font-size:27px}.metrics small{font-size:12px}
+  .needle-panel h2,.history-panel h2,.structure-panel h2{font-size:20px}.history-panel .chart-caption{font-size:13px}
+}

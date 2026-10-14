@@ -48,6 +48,14 @@ The `.xlsx` workbook includes the target and computed spectrum, residuals, layer
 
 The needle chart retains the **last scanned structure** while refinement changes the current stack. Intermediate LM frames are batched for presentation; the numerical solver still evaluates every accepted step.
 
+## Version 1.2 engineering dashboard
+
+The spectrum has a substantially larger plotting area, with a fine vector grid and wavelength ticks adapted to the available width. Needle sensitivity and convergence are grouped at the right; the physical stack, insertion detail and live numerical summary sit below. All remain visible together on a desktop. Click the spectrum away from a target handle to inspect wavelength, target/current reflectance and signed error in percentage points. **Fit R** expands small reflectance differences vertically; **Full R** restores the full physical 0–100% range.
+
+**Merit function** now labels the actual nonnegative MSE on its logarithmic axis, such as `0.01` or `1e−4`, rather than displaying negative values of `log10(MSE)`. A dashed green guide marks the requested limit. Exact zero gets its own explicitly explained marker below the positive logarithmic range. Negative values on **Needle sensitivity** are valid derivatives and identify improving insertion directions.
+
+See [version 1.2 release notes](docs/RELEASE-v1.2.0.md).
+
 ## Version 1.1 verification and presentation
 
 - **Live** holds a needle insertion for 1.9 seconds; **Cinematic** holds it for 3.2 seconds. The local detail enlarges the insertion neighborhood while preserving relative thicknesses. Pause freezes the numerical stage and visual motion; Fast removes presentation holds.

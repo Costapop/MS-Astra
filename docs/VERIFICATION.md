@@ -88,3 +88,9 @@ The finite verification grid is a stronger diagnostic, not a certified continuou
 Workbook tests cover ZIP integrity, OOXML relationships, numerical precision, residuals, formulas and cached totals, Unicode/XML escaping, layer order, input validation, and browser downloads. The independent verification is exported separately from the original optimization spectrum. An independent ZIP/XML and openpyxl read checks workbook values.
 
 Browser checks cover real worker execution, pause/resume, stop, target-band editing, presentation mode, layer inspection, narrow and wide layouts, and Excel download. The application has no external runtime dependencies. See [METHOD.md](METHOD.md) for equations, source references, and the declared search budgets.
+
+### Version 1.2 axis and dashboard checks
+
+The merit remains a mean squared residual and cannot be negative for finite valid input. The previous negative y-axis labels were `log10(MSE)`, not negative objective values. The chart now labels actual MSE and places the requested threshold on the same logarithmic mapping. Eight additional tests check equal-ratio spacing, domain inclusion, exact-zero separation, identical/empty series, tiny positive values, extreme finite values and rejection of invalid or negative inputs. Three additional reflectance-range tests verify physical bounds, minimum span and padding for the Fit R view. The full suite has 49 passing tests.
+
+The revised browser dashboard was checked at 1100 × 768, 1366 × 768 and 1440 × 900: all four visualizations fit within the viewport. At 390 × 844 it uses a vertical layout. A full browser run of the default mirror reproduces the result above, and actual rendered merit tick values are nonnegative. Click inspection evaluates the current coating directly at the selected wavelength.
