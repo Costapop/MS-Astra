@@ -37,6 +37,11 @@ export const DEFAULTS = {
   thinLayer: 1,
   needleWidth: 10,
   candidates: 3,
+  transition: 0,
+  denseCheck: true,
+  enrichGrid: true,
+  multiStart: false,
+  exploreBudget: 20,
 };
 
 export function uniformGrid(min, max, count) {
@@ -55,6 +60,42 @@ export function targetOnGrid(bands, grid) {
     t[i] = b.R;
   }
   return t;
+}
+
+/**
+ * Sample the piecewise-constant target on an arbitrary wavelength list and
+ * build the merit weights: ν_l = 1/L' over the points outside the transition
+ * zones (|λ − λ_jump| < transition/2 around every interior band boundary get
+ * weight 0; Furman–Tikhonravov §2.1: small or zero weights where the target
+ * changes abruptly). Returns { target, weights, excluded }.
+ */
+export function sampleTarget(bands, grid, transition = 0) {
+  const target = targetOnGrid(bands, grid);
+  const weights = new Float64Array(grid.length);
+  const jumps = bands.slice(0, -1).map((b) => b.to);
+  let excluded = 0, kept = 0;
+  for (let i = 0; i < grid.length; i++) {
+    const inZone = transition > 0 && jumps.some((j) => Math.abs(grid[i] - j) < transition / 2 - 1e-9);
+    if (inZone) { weights[i] = 0; excluded++; } else { weights[i] = 1; kept++; }
+  }
+  const norm = kept > 0 ? 1 / kept : 1 / grid.length;
+  for (let i = 0; i < grid.length; i++) weights[i] = kept > 0 ? weights[i] * norm : norm;
+  return { target, weights, excluded };
+}
+
+/**
+ * Independent dense verification grid: uniform with at least `points`
+ * (default max(2001, 8·L)) samples plus both sides of every target jump.
+ */
+export function denseGrid(bands, lambdaMin, lambdaMax, transition = 0, points) {
+  const count = points ?? 2001;
+  const span = lambdaMax - lambdaMin;
+  const list = Array.from(uniformGrid(lambdaMin, lambdaMax, count));
+  for (const b of bands.slice(0, -1)) { const eps = Math.max(1e-6 * span, 1e-6); list.push(b.to - eps, b.to + eps); }
+  list.sort((a, b) => a - b);
+  const wl = Float64Array.from(list);
+  const s = sampleTarget(bands, wl, transition);
+  return { wavelengths: wl, target: s.target, weights: s.weights };
 }
 
 export function bandsFromPreset(p) {
@@ -77,6 +118,11 @@ export function validateConfig(c) {
   if (!(c.startThickness >= 0)) errors.push('Starting thickness must be non‑negative.');
   if (c.startThickness * (c.startMaterial?.n || 1) > c.maxTOT) errors.push('Starting optical thickness exceeds the optical‑thickness limit.');
   if (!(c.thinLayer >= 0)) errors.push('Thin‑layer threshold must be non‑negative.');
+  if (!((c.transition ?? 0) >= 0)) errors.push('Transition‑zone width must be non‑negative.');
+  if ((c.transition ?? 0) > 0 && (c.bands || []).length > 1) {
+    const span = c.lambdaMax - c.lambdaMin;
+    if (c.transition >= span / 2) errors.push('Transition zone is too wide for the spectral range.');
+  }
   for (const b of c.bands || []) if (!(b.R >= 0 && b.R <= 1)) errors.push('Target reflectance must be between 0 and 1.');
   return { ok: errors.length === 0, errors };
 }

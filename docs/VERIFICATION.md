@@ -1,4 +1,4 @@
-# MS Astra 2 — verification evidence
+# MS Astra 2.1 — verification evidence
 
 Run `npm test` (Node 20+). All checks are automated in `tests/`.
 
@@ -27,6 +27,21 @@ Run `npm test` (Node 20+). All checks are automated in `tests/`.
   respected, growth steps occur, final design is the best archived.
 * `growthSearch` returns a true local minimum in the thickness of the chosen
   layer beyond a merit rise.
+* Candidate comparison (v2.1): from the refined four‑layer parent of the
+  specification, the three refined alternatives give F = 1.759968e‑4,
+  4.174423e‑5 and 4.174423e‑5 as printed in §13.4; the second candidate by g
+  wins and the resulting six‑layer design equals eq. (13.7) of the
+  specification to 2e‑3 nm with F = 4.174423e‑5.
+* Transition zones: points within half the zone width of a jump get zero
+  weight (595, 600, 605 nm for a 20 nm zone on an 81‑point 400–800 nm grid);
+  weights stay normalised; the dense grid carries the same exclusion.
+* Dense‑grid check: on a 5‑point grid over 400–800 nm the synthesis "reaches"
+  F ≤ 1e‑4 with a design whose dense‑grid merit exceeds 1e‑4 (aliasing);
+  with the check enabled the grid is enriched automatically and the final
+  design satisfies the target on the dense grid as well.
+* Multi‑start: ten starting designs are generated for the mirror problem, the
+  ranking is monotone, the winner respects the limits and is never worse than
+  the manual start.
 * Constrained LM keeps `d ≥ 0` and honours the optical‑thickness bound.
 
 ## Excel export (`tests/xlsx.test.js`)
@@ -41,4 +56,7 @@ development.
 Checked in headless Chromium at 1440×900 (light and dark), 1280×720 and
 820 px width: synthesis of the default mirror preset completes in Instant
 mode with no console errors; Live mode animates refinement, needle scan,
-insertion, growth and cleanup; Excel download works; layer table opens.
+candidate comparison, insertion, growth and cleanup; the edge filter with a
+20 nm transition zone reaches the target; multi‑start exploration runs in a
+background worker and replays the winner; Excel download (with Verification
+and Starts sheets) works; layer and starts tables open.

@@ -55,6 +55,10 @@
       <h2>Target reflectance</h2>
       <p class="hint">Drag levels and boundaries on the chart, double‑click a band to split it, double‑click a boundary to merge. Values are editable here too.</p>
       <div class="bands" id="bands"></div>
+      <div class="rows">
+        <label class="row"><span>Transition zone at jumps <em>nm</em></span><input type="number" id="transition" min="0" step="1"></label>
+      </div>
+      <p class="hint">Spectral points closer than half the zone width to a target jump get zero weight: an ideal edge cannot be matched and would otherwise dominate the merit.</p>
     </section>
 
     <section class="group">
@@ -70,6 +74,12 @@
     <section class="group">
       <h2>Starting design</h2>
       <div class="rows">
+        <div class="row"><span>Mode</span>
+          <div class="segmented small" id="start-mode" role="radiogroup">
+            <button type="button" data-mode="single" role="radio" aria-checked="true" class="active">Single layer</button>
+            <button type="button" data-mode="multi" role="radio" aria-checked="false">Multi‑start</button>
+          </div>
+        </div>
         <div class="row"><span>Material</span>
           <div class="segmented small" id="start-material" role="radiogroup">
             <button type="button" data-start="H" role="radio" aria-checked="true" class="active">H</button>
@@ -77,7 +87,9 @@
           </div>
         </div>
         <label class="row"><span>Geometric thickness <em>nm</em></span><input type="number" id="start-thickness" min="0" step="1"></label>
+        <label class="row" id="row-budget" hidden><span>Time budget per start <em>s</em></span><input type="number" id="explore-budget" min="1" max="600" step="1"></label>
       </div>
+      <p class="hint" id="start-hint"></p>
     </section>
 
     <section class="group">
@@ -95,8 +107,11 @@
       <div class="rows">
         <label class="row"><span>Thin‑layer threshold <em>nm</em></span><input type="number" id="thin-layer" min="0" step="0.1"></label>
         <label class="row"><span>Initial needle width <em>nm</em></span><input type="number" id="needle-width" min="0.01" step="1"></label>
-        <label class="row"><span>Needle candidates per step</span><input type="number" id="candidates" min="1" max="10" step="1"></label>
+        <label class="row"><span>Candidates compared per step <em>0 = all</em></span><input type="number" id="candidates" min="0" max="20" step="1"></label>
+        <label class="row"><span>Dense‑grid check</span><input type="checkbox" class="switch" id="dense-check"></label>
+        <label class="row"><span>Enrich grid automatically</span><input type="checkbox" class="switch" id="enrich-grid"></label>
       </div>
+      <p class="hint">Every needle candidate is refined independently and the best refined design is kept (deep search). The dense check evaluates the design on an independent grid of 2001 points; under‑resolved spectra get extra optimization points where the error is largest.</p>
     </details>
 
     <div class="errors" id="errors" hidden></div>
@@ -108,9 +123,10 @@
       <header>
         <h3>Reflectance spectrum</h3>
         <div class="legend">
-          <span class="legend-item"><i class="swatch target"></i>Target R̃(λ)</span>
-          <span class="legend-item"><i class="swatch current"></i>Current R(λ)</span>
-          <span class="legend-item"><i class="swatch grid"></i>Spectral points</span>
+          <span class="legend-item"><i class="swatch target"></i>Target R̃</span>
+          <span class="legend-item"><i class="swatch current"></i>Current R</span>
+          <span class="legend-item" title="Optimization grid points on the target; hollow = zero weight, ring = added by grid enrichment"><i class="swatch grid"></i>Points</span>
+          <span class="legend-item" id="legend-zone" hidden title="Zero-weight transition zone around a target jump"><i class="swatch zone"></i>Zone</span>
         </div>
         <div class="card-tools">
           <div class="segmented small" id="yscale"><button type="button" data-y="full" class="active">0–100 %</button><button type="button" data-y="fit">Fit</button></div>
@@ -120,7 +136,7 @@
     </article>
 
     <article class="card" id="card-stats">
-      <header><h3>Synthesis</h3><span class="muted" id="cycle-label">—</span></header>
+      <header><h3>Synthesis</h3><span class="muted" id="cycle-label">—</span><button type="button" class="link" id="btn-starts" hidden style="margin-left:auto">Starts</button></header>
       <div class="tiles">
         <div class="tile"><span class="k">Merit F</span><strong id="t-merit">—</strong><span class="sub" id="t-merit-sub">mean square</span></div>
         <div class="tile"><span class="k">RMS error</span><strong id="t-rms">—</strong><span class="sub" id="t-maxdev">max —</span></div>
@@ -129,6 +145,7 @@
       </div>
       <div class="progress"><div class="bar" id="progress-bar"></div></div>
       <p class="result" id="result-line"></p>
+      <ol class="starts-list" id="explore-list" hidden></ol>
     </article>
 
     <article class="card" id="card-needle">
@@ -162,6 +179,11 @@
     </article>
   </section>
 </main>
+
+<dialog id="starts-dialog" class="sheet">
+  <header><h3>Multi‑start exploration</h3><button type="button" class="btn" id="starts-close">Close</button></header>
+  <div class="recipe-wrap"><table id="starts-table"></table></div>
+</dialog>
 
 <dialog id="recipe-dialog" class="sheet">
   <header><h3>Layer table</h3><button type="button" class="btn" id="recipe-close">Close</button></header>

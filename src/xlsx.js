@@ -107,9 +107,9 @@ export function buildWorkbook(sheets) {
 }
 
 /** Build the MS Astra result workbook. */
-export function resultWorkbook({ settings, wavelengths, target, R, layers, result }) {
+export function resultWorkbook({ settings, wavelengths, target, weights, R, layers, result, starts = [] }) {
   const spectrum = {
-    name: 'Spectrum', title: 'Target and synthesized reflectance',
+    name: 'Spectrum', title: 'Target and synthesized reflectance on the optimization grid',
     columns: [
       { title: 'Wavelength, nm', width: 16, style: 3 },
       { title: 'Target R', width: 12, style: 4 },
@@ -117,8 +117,9 @@ export function resultWorkbook({ settings, wavelengths, target, R, layers, resul
       { title: 'Synthesized R', width: 14, style: 4 },
       { title: 'Synthesized R, %', width: 16, style: 3 },
       { title: 'Difference, p.p.', width: 16, style: 3 },
+      { title: 'Merit weight', width: 13, style: 4 },
     ],
-    rows: Array.from(wavelengths, (w, i) => [w, target[i], 100 * target[i], R[i], 100 * R[i], 100 * (R[i] - target[i])]),
+    rows: Array.from(wavelengths, (w, i) => [w, target[i], 100 * target[i], R[i], 100 * R[i], 100 * (R[i] - target[i]), weights ? weights[i] : 1 / wavelengths.length]),
   };
   let z = 0;
   const design = {
@@ -149,7 +150,10 @@ export function resultWorkbook({ settings, wavelengths, target, R, layers, resul
       ['Spectral range, nm', `${settings.lambdaMin} – ${settings.lambdaMax}`],
       ['Spectral points', settings.points],
       ['Target bands', settings.bands.map((b) => `${b.from.toFixed(1)}–${b.to.toFixed(1)} nm: R = ${(100 * b.R).toFixed(2)} %`).join('; ')],
-      ['Starting design', `${settings.startMaterial.key}, ${settings.startThickness} nm`],
+      ['Starting design', settings.startMode === 'multi' ? `Multi‑start; best: ${settings.startName || '—'}` : `${settings.startMaterial.key}, ${settings.startThickness} nm`],
+      ['Transition zone at target jumps, nm', settings.transition ?? 0],
+      ['Needle candidates compared per step', settings.candidates === 0 ? 'all' : settings.candidates],
+      ['Dense‑grid check / grid enrichment', `${settings.denseCheck ? 'on' : 'off'} / ${settings.denseCheck && settings.enrichGrid ? 'on' : 'off'}`],
       ['Maximum layers', settings.maxLayers],
       ['Maximum total optical thickness, nm', settings.maxTOT],
       ['Target merit function F (mean square of R − R̃)', settings.targetMerit],
@@ -158,16 +162,46 @@ export function resultWorkbook({ settings, wavelengths, target, R, layers, resul
       ['Result: layers', layers.length],
       ['Result: merit function F', result.F],
       ['Result: RMS deviation of R, %', 100 * Math.sqrt(result.F)],
-      ['Result: maximum |R − R̃|, p.p.', 100 * result.maxDev],
+      ['Result: maximum |R − R̃| on the grid, p.p.', 100 * result.maxDev],
+      ['Result: optimization grid points', wavelengths.length],
+      ['Result: dense‑grid merit F', result.dense ? result.dense.F : 'not checked'],
+      ['Result: dense‑grid RMS deviation, %', result.dense ? 100 * Math.sqrt(result.dense.F) : 'not checked'],
+      ['Result: dense‑grid maximum |R − R̃|, p.p.', result.dense ? 100 * result.dense.maxDev : 'not checked'],
       ['Result: total geometric thickness, nm', totGeo],
       ['Result: total optical thickness, nm', totOpt],
       ['Termination', result.reason || ''],
-      ['Needles inserted / rejected', `${result.stats?.needles ?? 0} / ${result.stats?.rejected ?? 0}`],
+      ['Needles inserted / alternatives refined / rejected', `${result.stats?.needles ?? 0} / ${result.stats?.compared ?? 0} / ${result.stats?.rejected ?? 0}`],
+      ['Grid enrichments / points added', `${result.stats?.enrichments ?? 0} / ${result.stats?.pointsAdded ?? 0}`],
+      ['Synthesis time, s', result.elapsedMs != null ? result.elapsedMs / 1000 : ''],
       ['Growth steps', result.stats?.growths ?? 0],
       ['Thin layers removed', result.stats?.cleanups ?? 0],
       ['Refinements / LM iterations', `${result.stats?.refinements ?? 0} / ${result.stats?.lmIterations ?? 0}`],
       ['Exported', new Date().toISOString()],
     ],
   };
-  return buildWorkbook([spectrum, design, summary]);
+  const sheets = [spectrum, design, summary];
+  if (result.dense) {
+    sheets.push({
+      name: 'Verification', title: `Independent dense‑grid check (${result.dense.wavelengths.length} points; zero weight inside transition zones and one grid step around jumps)`,
+      columns: [
+        { title: 'Wavelength, nm', width: 16, style: 3 },
+        { title: 'Target R', width: 12, style: 4 },
+        { title: 'Synthesized R', width: 14, style: 4 },
+        { title: 'Difference, p.p.', width: 16, style: 3 },
+        { title: 'Counted', width: 10 },
+      ],
+      rows: Array.from(result.dense.wavelengths, (w, i) => [w, result.dense.target[i], result.dense.R[i], 100 * (result.dense.R[i] - result.dense.target[i]), result.dense.weights[i] > 0 ? 'yes' : 'no']),
+    });
+  }
+  if (starts && starts.length) {
+    sheets.push({
+      name: 'Starts', title: 'Multi‑start exploration',
+      columns: [
+        { title: 'Starting design', width: 40 }, { title: 'Merit F', width: 14, style: 5 }, { title: 'Dense‑grid F', width: 14, style: 5 },
+        { title: 'Layers', width: 8 }, { title: 'Optical thickness, nm', width: 20, style: 3 }, { title: 'Termination', width: 44 }, { title: 'Time, s', width: 9, style: 3 },
+      ],
+      rows: starts.slice().sort((a, b) => a.score - b.score).map((r) => [r.name, r.F, r.Fdense ?? 'not checked', r.layers.length, r.opticalThickness, r.reason, r.elapsedMs / 1000]),
+    });
+  }
+  return buildWorkbook(sheets);
 }

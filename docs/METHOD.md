@@ -1,4 +1,4 @@
-# MS Astra 2 — mathematical method
+# MS Astra 2.1 — mathematical method
 
 This document records the exact formulas implemented in `src/optics.js`,
 `src/refine.js` and `src/synthesis.js`. The formalism follows
@@ -47,6 +47,13 @@ F(d) = Σ_l ν_l (R_l − R̃_l)²,     ν_l = 1/L            (3.2)
 `R̃` is the piecewise‑constant target sampled on a uniform grid of `L`
 wavelengths. The interface shows `F` (mean square) and the equivalent RMS
 deviation `100·√F` in percent.
+
+**Transition zones (v2.1).** An ideal jump of the target cannot be matched by
+any finite coating, and the points next to it would otherwise dominate `F`
+(Furman–Tikhonravov §2.1 recommend small or zero weights there). With a
+transition zone of width `w` every grid point with `|λ − λ_jump| < w/2` gets
+`ν_l = 0`; the remaining weights are renormalised to sum to one. Zero‑weight
+points are still displayed and exported.
 
 ## 4. Adjoint function and analytic derivatives
 
@@ -98,15 +105,19 @@ vanishing projected gradient, or no admissible descent step.
    candidates (a new layer at the substrate and at the air side, §9.1).
 2. Negative local minima are refined by golden‑section search and sorted by
    `g`; values below `10⁻⁶·max|g|` are treated as numerical zero.
-3. For up to `K_cand` candidates (default 3) the needle is inserted
-   symmetrically around `z` (9.2) with initial width `η₀` (default 10 nm, as
-   recommended in the book for the visible range), halved until the raw merit
-   satisfies the Armijo condition `F(η) ≤ F + 10⁻⁴ η g` (9.7–9.8, RAW_ARMIJO
-   policy) and the optical‑thickness limit.
-4. The new structure is refined; it replaces the parent only if the refined
-   merit is lower (REFINE_THEN_ACCEPT, 9.9). Otherwise the next candidate is
-   tried. Layers that shrink to zero are removed and equal neighbours merged
-   (10.1).
+3. For the `K_cand` most negative candidates (default 3; 0 = all admissible
+   minima) the needle is inserted symmetrically around `z` (9.2) with initial
+   width `η₀` (default 10 nm, as recommended in the book for the visible
+   range), halved until the raw merit satisfies the Armijo condition
+   `F(η) ≤ F + 10⁻⁴ η g` (9.7–9.8, RAW_ARMIJO policy) and the
+   optical‑thickness limit.
+4. **Candidate comparison (v2.1).** Every admissible candidate is refined
+   independently and the design with the lowest refined merit replaces the
+   parent, provided it is lower than the parent (REFINE_THEN_ACCEPT, 9.9;
+   doc §13.4; Trubetskov 2020, deep search). The most negative `g` is not
+   the best predictor of the refined result: on the reference example the
+   first candidate by `g` gains 22 % while the second gains 81.5 %. Layers
+   that shrink to zero are removed and equal neighbours merged (10.1).
 
 The needle cycle repeats until no admissible negative candidate remains or no
 candidate survives refinement.
@@ -127,6 +138,35 @@ layer is replaced by host material of the same optical thickness and the
 neighbours are merged (Tikhonravov 2024, §1.2.4, Fig. 1.19); an outer thin
 layer is dropped. The design is then re‑refined. Cleanup runs inside every
 cycle and once more before the final refinement.
+
+## 8a. Independent dense‑grid check and grid enrichment (v2.1)
+
+A low merit on a sparse grid can be an aliasing artefact: between the
+optimization points the spectrum may oscillate freely (the number of
+extrema grows with the number of layers; the book asks for 3–4 points per
+oscillation). At the top of every cycle and at the end the design is
+evaluated on an independent uniform grid of 2001 points plus both sides of
+every target jump; one optimization‑grid step around each jump (or the wider
+user transition zone) is excluded, because a discrete grid cannot resolve an
+ideal edge better than its spacing. If `F_dense > 1.25·F`, or the target is
+met on the grid but not on the dense grid, the optimization grid is enriched
+with the dense points of largest error (up to 8 per cycle, each at least a
+quarter of the grid spacing from existing points, up to `max(4L, 400)`
+points; doc A.3 ENRICH_GRID), the design is re‑refined and the archive is
+reset to the new merit definition. The target‑merit criterion requires both
+`F ≤ F_target` and `F_dense ≤ F_target`.
+
+## 8b. Multi‑start exploration (v2.1)
+
+The total optical thickness of the starting design largely determines the
+reachable merit (Tikhonravov 2024, Table 1.2; doc §13.5 obtains F = 1·10⁻⁷
+from a 150 nm L start and 6·10⁻¹³ from a 200 nm H start on the same
+problem). In multi‑start mode the manual single layer, single L and H layers
+of 1, 2, 4 and 8 quarter‑waves at the band centre, and a quarter‑wave stack
+(HL)ᴺH at the band centre within the limits are synthesized to completion
+in a background worker with a time budget per start; the designs are ranked
+by `max(F, F_dense)` and the winner's evolution is replayed on the dashboard
+(the synthesis is deterministic, so the replay reproduces the result).
 
 ## 9. Termination and result
 
@@ -154,3 +194,4 @@ outcome of a bounded local search from the chosen starting layer.
 | 6‑layer refined design | 94.2993/61.6430/116.6421/2.6146/28.3315/107.3616 | within 2e‑4 nm |
 | F₆ | 1.75996773e‑4 | 1.75996773e‑4 |
 | alternative candidate (row 2) | F = 4.174423e‑5 | 4.174423e‑5 |
+| K ≥ 2 with comparison (eq. 13.7) | 95.7914/102.3440/31.4759/13.7106/113.4594/114.4973, F = 4.174423e‑5 | identical to 2e‑3 nm, F identical |

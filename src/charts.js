@@ -84,7 +84,7 @@ export class SpectrumChart extends Plot {
   constructor(canvas, tooltip) {
     super(canvas, { l: 66, r: 18, t: 26, b: 34 });
     this.tooltip = tooltip;
-    this.state = { lambdaMin: 400, lambdaMax: 700, bands: [], grid: null, target: null, R: null, yMode: 'full', editable: true };
+    this.state = { lambdaMin: 400, lambdaMax: 700, bands: [], grid: null, target: null, R: null, weights: null, added: null, curve: null, transition: 0, yMode: 'full', editable: true };
     this.onChange = null;      // (patch) => void
     this.hover = null; this.drag = null;
     const c = canvas;
@@ -105,7 +105,7 @@ export class SpectrumChart extends Plot {
     if (s.yMode === 'fit') {
       let lo = Infinity, hi = -Infinity;
       const scan = (arr) => { if (arr) for (let i = 0; i < arr.length; i++) { lo = Math.min(lo, arr[i]); hi = Math.max(hi, arr[i]); } };
-      scan(s.target); scan(s.R);
+      scan(s.target); scan(s.R); if (s.curve) scan(s.curve.R);
       if (!Number.isFinite(lo)) { lo = 0; hi = 1; }
       const p = Math.max((hi - lo) * 0.15, 0.005);
       y0 = Math.max(0, lo - p); y1 = Math.min(1, hi + p);
@@ -223,12 +223,24 @@ export class SpectrumChart extends Plot {
     const yt = { ticks: niceTicks(y0, y1, Math.max(3, Math.floor((fr.y1 - fr.y0) / 44))), scale: ys };
     this.axes(ctx, fr, xt, yt, (v) => fmtNum(v), (v) => `${fmtNum(100 * v, y1 - y0 < 0.1 ? 2 : 0)} %`, 'wavelength, nm', 'reflectance R');
     ctx.save(); ctx.beginPath(); ctx.rect(fr.x0, fr.y0 - 1, fr.x1 - fr.x0, fr.y1 - fr.y0 + 2); ctx.clip();
-    // current R: area + line
-    if (s.R && s.grid) {
+    // transition zones around target jumps (zero weight)
+    if (s.transition > 0 && s.bands.length > 1) {
+      ctx.save(); ctx.strokeStyle = T['ink-3']; ctx.globalAlpha = 0.35; ctx.lineWidth = 1;
+      for (let i = 0; i < s.bands.length - 1; i++) {
+        const xa = xs(s.bands[i].to - s.transition / 2), xb = xs(s.bands[i].to + s.transition / 2);
+        ctx.save(); ctx.beginPath(); ctx.rect(xa, fr.y0, xb - xa, fr.y1 - fr.y0); ctx.clip();
+        for (let x = xa - (fr.y1 - fr.y0); x < xb; x += 6) { ctx.beginPath(); ctx.moveTo(x, fr.y1); ctx.lineTo(x + (fr.y1 - fr.y0), fr.y0); ctx.stroke(); }
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+    // current R: dense display curve (or grid values) as area + line
+    const cw = s.curve ? s.curve.wl : s.grid, cR = s.curve ? s.curve.R : s.R;
+    if (cw && cR) {
       ctx.beginPath();
-      for (let i = 0; i < s.grid.length; i++) { const x = xs(s.grid[i]), y = ys(s.R[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+      for (let i = 0; i < cw.length; i++) { const x = xs(cw[i]), y = ys(cR[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
       ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2.25; ctx.lineJoin = 'round'; ctx.stroke();
-      ctx.lineTo(xs(s.grid[s.grid.length - 1]), ys(y0)); ctx.lineTo(xs(s.grid[0]), ys(y0)); ctx.closePath();
+      ctx.lineTo(xs(cw[cw.length - 1]), ys(y0)); ctx.lineTo(xs(cw[0]), ys(y0)); ctx.closePath();
       ctx.fillStyle = T['series-current-fill']; ctx.fill();
     }
     // target: thick step line
@@ -238,10 +250,17 @@ export class SpectrumChart extends Plot {
     ctx.lineWidth = 1; ctx.setLineDash([3, 4]); ctx.strokeStyle = T['ink-3'];
     for (let i = 0; i < s.bands.length - 1; i++) { const x = Math.round(xs(s.bands[i].to)) + 0.5; ctx.beginPath(); ctx.moveTo(x, fr.y0); ctx.lineTo(x, fr.y1); ctx.stroke(); }
     ctx.setLineDash([]);
-    // grid points as small dots on the target line
-    if (s.grid && s.target && s.grid.length <= 400) {
-      ctx.fillStyle = T['ink-3'];
-      for (let i = 0; i < s.grid.length; i++) { ctx.beginPath(); ctx.arc(xs(s.grid[i]), ys(s.target[i]), 2, 0, Math.PI * 2); ctx.fill(); }
+    // grid points as small dots on the target line (hollow = zero weight, ring = added by enrichment)
+    if (s.grid && s.target && s.grid.length <= 600) {
+      for (let i = 0; i < s.grid.length; i++) {
+        const x = xs(s.grid[i]), y = ys(s.target[i]);
+        const zero = s.weights && s.weights[i] <= 0;
+        const added = s.added && s.added.has(s.grid[i]);
+        ctx.beginPath(); ctx.arc(x, y, added ? 3.2 : 2, 0, Math.PI * 2);
+        if (zero) { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 1; ctx.stroke(); }
+        else if (added) { ctx.fillStyle = T.card; ctx.fill(); ctx.strokeStyle = T.good; ctx.lineWidth = 1.5; ctx.stroke(); }
+        else { ctx.fillStyle = T['ink-3']; ctx.fill(); }
+      }
     }
     // hover crosshair
     if (this.hover && !this.drag && s.grid && this.hoverIndex != null && !this.tooltip.hidden) {

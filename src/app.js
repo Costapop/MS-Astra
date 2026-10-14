@@ -1,14 +1,15 @@
 /**
  * MS Astra — application controller: settings, target editor, synthesis
- * runner with demonstration pacing and animation, dashboard updates, export.
+ * runner with demonstration pacing and animation, multi‑start exploration in
+ * a background worker, dashboard updates, export.
  */
-import { LAYER_MATERIALS, SUBSTRATES, PRESETS, DEFAULTS, materialByKey, uniformGrid, targetOnGrid, bandsFromPreset, validateConfig } from './config.js';
-import { reflectance, merit, meritWeights, totalOpticalThickness } from './optics.js';
-import { synthesize } from './synthesis.js';
+import { LAYER_MATERIALS, SUBSTRATES, PRESETS, DEFAULTS, materialByKey, uniformGrid, sampleTarget, bandsFromPreset, validateConfig } from './config.js';
+import { reflectance, merit, totalOpticalThickness } from './optics.js';
+import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
 
-export const VERSION = '2.0.0';
+export const VERSION = '2.1.0';
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------------ */
@@ -18,10 +19,12 @@ const settings = {
   preset: DEFAULTS.preset,
   lambdaMin: 450, lambdaMax: 650, points: DEFAULTS.points,
   bands: [{ from: 450, to: 650, R: 0.95 }],
+  transition: DEFAULTS.transition,
   H: 'Ta2O5', L: 'SiO2', substrate: DEFAULTS.substrate,
-  startMaterial: 'H', startThickness: 100,
+  startMode: DEFAULTS.multiStart ? 'multi' : 'single', startMaterial: 'H', startThickness: 100, exploreBudget: DEFAULTS.exploreBudget,
   maxLayers: 30, maxTOT: 5000, targetMerit: 1e-4,
   thinLayer: DEFAULTS.thinLayer, needleWidth: DEFAULTS.needleWidth, candidates: DEFAULTS.candidates,
+  denseCheck: DEFAULTS.denseCheck, enrichGrid: DEFAULTS.enrichGrid,
 };
 
 function applyPreset(key) {
@@ -29,6 +32,7 @@ function applyPreset(key) {
   settings.preset = key;
   settings.lambdaMin = p.range[0]; settings.lambdaMax = p.range[1];
   settings.bands = bandsFromPreset(p);
+  settings.transition = p.transition ?? 0;
   settings.H = p.H; settings.L = p.L;
   settings.startMaterial = p.start.material === p.H ? 'H' : 'L';
   settings.startThickness = p.start.thickness;
@@ -39,11 +43,26 @@ function materialH() { return materialByKey(settings.H); }
 function materialL() { return materialByKey(settings.L); }
 function substrate() { return materialByKey(settings.substrate); }
 function startMat() { return settings.startMaterial === 'H' ? materialH() : materialL(); }
+const lambdaCenter = () => (settings.lambdaMin + settings.lambdaMax) / 2;
 
 function buildProblem() {
   const grid = uniformGrid(settings.lambdaMin, settings.lambdaMax, settings.points);
-  const target = targetOnGrid(settings.bands, grid);
-  return { grid, target, weights: meritWeights(grid.length) };
+  const s = sampleTarget(settings.bands, grid, settings.transition);
+  return { grid, target: s.target, weights: s.weights, excluded: s.excluded };
+}
+
+function engineConfig() {
+  const { grid, target, weights } = buildProblem();
+  const H = { n: materialH().n, m: materialH().key }, L = { n: materialL().n, m: materialL().key };
+  return {
+    wavelengths: grid, target, weights, ns: substrate().n, na: 1,
+    bands: settings.bands.map((b) => ({ ...b })), transition: settings.transition,
+    materials: { H, L },
+    start: { material: startMat().key, thickness: settings.startThickness },
+    maxLayers: settings.maxLayers, maxOpticalThickness: settings.maxTOT, targetMerit: settings.targetMerit,
+    thinLayer: settings.thinLayer, needleWidth: settings.needleWidth, candidates: settings.candidates, compare: true,
+    dense: { enabled: settings.denseCheck }, enrich: { enabled: settings.denseCheck && settings.enrichGrid },
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -103,12 +122,18 @@ function renderBands() {
 
 function syncForm() {
   $('lambda-min').value = settings.lambdaMin; $('lambda-max').value = settings.lambdaMax; $('points').value = settings.points;
+  $('transition').value = settings.transition;
   fillSelect($('mat-h'), LAYER_MATERIALS, settings.H); fillSelect($('mat-l'), LAYER_MATERIALS, settings.L); fillSelect($('substrate'), SUBSTRATES, settings.substrate);
   for (const b of $('start-material').querySelectorAll('button')) { const on = b.dataset.start === settings.startMaterial; b.classList.toggle('active', on); b.setAttribute('aria-checked', on); }
+  for (const b of $('start-mode').querySelectorAll('button')) { const on = b.dataset.mode === settings.startMode; b.classList.toggle('active', on); b.setAttribute('aria-checked', on); }
   $('start-thickness').value = settings.startThickness;
-  $('max-layers').value = settings.maxLayers; $('max-tot').value = settings.maxTOT; $('target-merit').value = settings.targetMerit.toExponential(0).replace('e-', 'e-').replace('e+', 'e');
+  $('explore-budget').value = settings.exploreBudget;
+  $('row-budget').hidden = settings.startMode !== 'multi';
+  $('max-layers').value = settings.maxLayers; $('max-tot').value = settings.maxTOT; $('target-merit').value = settings.targetMerit.toExponential(0).replace('e+', 'e');
   $('thin-layer').value = settings.thinLayer; $('needle-width').value = settings.needleWidth; $('candidates').value = settings.candidates;
-  renderPresets(); renderBands(); updateMeritHint(); updateLegendMaterials();
+  $('dense-check').checked = settings.denseCheck; $('enrich-grid').checked = settings.enrichGrid; $('enrich-grid').disabled = !settings.denseCheck;
+  $('legend-zone').hidden = !(settings.transition > 0 && settings.bands.length > 1);
+  renderPresets(); renderBands(); updateMeritHint(); updateLegendMaterials(); updateStartHint();
 }
 
 function updateMeritHint() {
@@ -119,25 +144,36 @@ function updateLegendMaterials() {
   $('legend-h').textContent = `${materialH()?.label ?? 'H'} (H)`;
   $('legend-l').textContent = `${materialL()?.label ?? 'L'} (L)`;
 }
+function updateStartHint() {
+  if (settings.startMode !== 'multi') { $('start-hint').textContent = ''; return; }
+  try {
+    const list = startDesigns(engineConfig(), lambdaCenter());
+    $('start-hint').textContent = `${list.length} starting designs are synthesized in the background (your single layer, L and H layers of 1–8 quarter‑waves, a quarter‑wave stack); the best result is then replayed on the dashboard.`;
+  } catch { $('start-hint').textContent = ''; }
+}
 
 function bindForm() {
   const num = (id, key, parse = Number) => $(id).addEventListener('change', () => { settings[key] = parse($(id).value); onSettingsChanged(); });
   $('lambda-min').addEventListener('change', () => { const v = Number($('lambda-min').value); settings.lambdaMin = v; settings.bands[0].from = v; onSettingsChanged(); });
   $('lambda-max').addEventListener('change', () => { const v = Number($('lambda-max').value); settings.lambdaMax = v; settings.bands[settings.bands.length - 1].to = v; onSettingsChanged(); });
   num('points', 'points', (v) => Math.round(Number(v)));
+  num('transition', 'transition');
   $('mat-h').addEventListener('change', () => { settings.H = $('mat-h').value; onSettingsChanged(); });
   $('mat-l').addEventListener('change', () => { settings.L = $('mat-l').value; onSettingsChanged(); });
   $('substrate').addEventListener('change', () => { settings.substrate = $('substrate').value; onSettingsChanged(); });
   for (const b of $('start-material').querySelectorAll('button')) b.addEventListener('click', () => { settings.startMaterial = b.dataset.start; onSettingsChanged(); });
+  for (const b of $('start-mode').querySelectorAll('button')) b.addEventListener('click', () => { settings.startMode = b.dataset.mode; onSettingsChanged(); });
   num('start-thickness', 'startThickness');
+  num('explore-budget', 'exploreBudget');
   num('max-layers', 'maxLayers', (v) => Math.round(Number(v)));
   num('max-tot', 'maxTOT');
   $('target-merit').addEventListener('change', () => { settings.targetMerit = Number($('target-merit').value); onSettingsChanged(); });
   num('thin-layer', 'thinLayer'); num('needle-width', 'needleWidth'); num('candidates', 'candidates', (v) => Math.round(Number(v)));
+  $('dense-check').addEventListener('change', () => { settings.denseCheck = $('dense-check').checked; onSettingsChanged(); });
+  $('enrich-grid').addEventListener('change', () => { settings.enrichGrid = $('enrich-grid').checked; onSettingsChanged(); });
 }
 
 function onSettingsChanged() {
-  // keep bands consistent with the range
   settings.bands.sort((a, b) => a.from - b.from);
   settings.bands[0].from = settings.lambdaMin; settings.bands[settings.bands.length - 1].to = settings.lambdaMax;
   for (let i = 0; i < settings.bands.length - 1; i++) settings.bands[i + 1].from = settings.bands[i].to;
@@ -165,26 +201,29 @@ const meritChart = new MeritChart($('merit'));
 spectrum.onChange = ({ bands, lambdaMin, lambdaMax, commit }) => {
   settings.bands = bands; settings.lambdaMin = lambdaMin; settings.lambdaMax = lambdaMax; settings.preset = null;
   if (commit) { onSettingsChanged(); } else {
-    const { grid, target } = buildProblem();
-    spectrum.set({ bands, lambdaMin, lambdaMax, grid, target });
+    const { grid, target, weights } = buildProblem();
+    spectrum.set({ bands, lambdaMin, lambdaMax, grid, target, weights });
     $('lambda-min').value = lambdaMin; $('lambda-max').value = lambdaMax; renderBands();
   }
 };
 
+const DISPLAY_POINTS = 361;
 const view = {
   R: null, goalR: null, tauR: 0.08,
   layers: [], tauD: 0.08,
   xmax: 1, goalXmax: 1,
   highlight: null, insertion: null, candidate: null,
+  displayGrid: null, curve: null, curveDirty: true,
 };
 const run = {
-  gen: null, running: false, paused: false, finished: false,
+  gen: null, running: false, paused: false, finished: false, exploring: false, worker: null,
   speed: 'live', holdUntil: 0, lastTime: 0,
   stepTo: null,
-  history: [], events: 0, F0: null, best: null, lastResult: null, cycle: 0, stage: '', engineLayers: [], problem: null,
+  history: [], events: 0, F0: null, lastResult: null, cycle: 0, stage: '', engineLayers: [], problem: null, added: new Set(),
+  dense: null, startName: null, exploreResults: [], exploreRanked: null, cfg: null,
 };
 const SPEED = { cinematic: 2.2, live: 1, fast: 0.25, instant: 0 };
-const HOLD = { start: 500, stage: 0, refine: 5, refined: 260, cycle: 200, scan: 950, needle: 1500, 'needle-rejected': 450, growth: 1400, cleanup: 950, note: 500, done: 0 };
+const HOLD = { start: 500, stage: 0, refine: 5, refined: 260, cycle: 200, scan: 950, compare: 900, needle: 1500, 'needle-rejected': 450, growth: 1400, cleanup: 950, note: 500, dense: 250, grid: 900, done: 0 };
 
 function toDisplayLayers(layers) {
   const Hk = settings.H;
@@ -194,14 +233,16 @@ function toDisplayLayers(layers) {
 function setInitialDesign() {
   const { grid, target, weights } = buildProblem();
   run.problem = { grid, target, weights };
+  run.added = new Set(); run.dense = null; run.startName = null; run.exploreResults = []; run.exploreRanked = null;
   const sm = startMat();
   const layers = [{ n: sm.n, m: sm.key, d: settings.startThickness }];
   const R = reflectance(layers, grid, substrate().n);
   view.R = Float64Array.from(R); view.goalR = R;
   view.layers = toDisplayLayers(layers);
+  view.displayGrid = uniformGrid(settings.lambdaMin, settings.lambdaMax, DISPLAY_POINTS); view.curveDirty = true;
   view.goalXmax = Math.max(50, settings.startThickness * 1.08); view.xmax = view.goalXmax;
   view.highlight = null; view.insertion = null; view.candidate = null;
-  spectrum.set({ lambdaMin: settings.lambdaMin, lambdaMax: settings.lambdaMax, bands: settings.bands, grid, target, R: view.R, editable: true });
+  spectrum.set({ lambdaMin: settings.lambdaMin, lambdaMax: settings.lambdaMax, bands: settings.bands, grid, target, weights, added: run.added, transition: settings.transition, R: view.R, curve: null, editable: true });
   needle.set({ xmax: view.xmax, layers: view.layers, scan: null, candidate: null, insertion: null, stale: false });
   structure.set({ xmax: view.xmax, layers: view.layers, nmax: Math.max(materialH().n, materialL().n), highlight: null, substrate: substrate().label, ns: substrate().n });
   meritChart.set({ history: [], targetF: settings.targetMerit });
@@ -210,22 +251,25 @@ function setInitialDesign() {
   $('progress-bar').style.width = '0%';
   $('result-line').textContent = ''; $('result-line').classList.remove('good');
   $('cycle-label').textContent = 'Not started';
+  $('explore-list').hidden = true; $('explore-list').innerHTML = ''; $('btn-starts').hidden = true; document.querySelector('#card-stats .tiles').hidden = false;
   $('log').innerHTML = '';
   $('btn-export').disabled = true;
   run.lastResult = null; run.history = []; run.F0 = F; run.events = 0; run.engineLayers = layers;
+  updateCurve(true);
 }
 
 function updateTiles({ F, layers, stage }) {
   const tot = totalOpticalThickness(layers);
   $('t-merit').textContent = fmt.sci(F);
   $('t-rms').textContent = `${(100 * Math.sqrt(Math.max(F, 0))).toFixed(3)} %`;
-  if (run.problem && view.goalR) {
-    let md = 0; for (let i = 0; i < view.goalR.length; i++) md = Math.max(md, Math.abs(view.goalR[i] - run.problem.target[i]));
+  if (run.dense) $('t-maxdev').textContent = `dense grid: ${(100 * Math.sqrt(run.dense.F)).toFixed(3)} % · max ${(100 * run.dense.maxDev).toFixed(2)} p.p.`;
+  else if (run.problem && view.goalR) {
+    let md = 0; for (let i = 0; i < view.goalR.length; i++) if (run.problem.weights[i] > 0) md = Math.max(md, Math.abs(view.goalR[i] - run.problem.target[i]));
     $('t-maxdev').textContent = `max |ΔR| ${(100 * md).toFixed(2)} p.p.`;
   }
   $('t-layers').textContent = String(layers.length); $('t-layers-sub').textContent = `of ${settings.maxLayers} max`;
   $('t-tot').textContent = `${tot.toFixed(0)} nm`; $('t-tot-sub').textContent = `of ${settings.maxTOT} nm max · ${(tot / (settings.lambdaMin + settings.lambdaMax) * 8).toFixed(1)} QWOT`;
-  $('t-merit-sub').textContent = `target ${settings.targetMerit.toExponential(0)}`;
+  $('t-merit-sub').textContent = `target ${settings.targetMerit.toExponential(0)} · ${run.problem ? run.problem.grid.length : settings.points} points`;
   if (run.F0 && settings.targetMerit < run.F0) {
     const p = Math.max(0, Math.min(1, Math.log(run.F0 / Math.max(F, 1e-300)) / Math.log(run.F0 / settings.targetMerit)));
     $('progress-bar').style.width = `${(100 * p).toFixed(1)}%`;
@@ -241,14 +285,25 @@ function setStage(text, cls) {
 function log(kind, html) {
   const ol = $('log');
   const li = document.createElement('li'); li.className = kind;
-  const tag = { needle: 'needle', growth: 'growth', cleanup: 'cleanup', refine: 'refine', done: 'done', reject: 'reject', note: 'note', start: 'start' }[kind] || kind;
-  li.innerHTML = `<span class="tag">${tag}</span><span>${html}</span>`;
+  li.innerHTML = `<span class="tag">${kind}</span><span>${html}</span>`;
   ol.appendChild(li);
-  while (ol.children.length > 300) ol.removeChild(ol.firstChild);
+  while (ol.children.length > 400) ol.removeChild(ol.firstChild);
   ol.scrollTop = ol.scrollHeight;
 }
 
 function pushHistory(F, mark) { run.history.push({ F, mark }); meritChart.set({ history: run.history }); }
+
+function updateCurve(force) {
+  if (!view.displayGrid || (!view.curveDirty && !force)) return;
+  const layers = view.layers.map((L) => ({ n: L.n, d: Math.max(0, L.d) }));
+  const R = reflectance(layers, view.displayGrid, substrate().n);
+  view.curve = { wl: view.displayGrid, R };
+  view.curveDirty = false;
+  spectrum.set({ curve: view.curve });
+}
+
+function syncStructure() { structure.set({ layers: view.layers, xmax: view.xmax, highlight: view.highlight }); }
+function matLabel(n) { return n === materialH().n ? materialH().label : materialL().label; }
 
 /* ------------------------------------------------------------------ */
 /*  Event application                                                  */
@@ -263,6 +318,7 @@ function layersFromEvent(evLayers, { animate = true } = {}) {
   const total = evLayers.reduce((s, L) => s + L.d, 0);
   view.goalXmax = Math.max(50, total * 1.06, view.scanTotal ? view.scanTotal * 1.06 : 0);
   run.engineLayers = evLayers;
+  view.curveDirty = true;
 }
 
 function applyEvent(ev, snap) {
@@ -272,7 +328,8 @@ function applyEvent(ev, snap) {
       view.goalR = ev.R; if (snap) view.R = Float64Array.from(ev.R);
       layersFromEvent(ev.layers, { animate: !snap });
       run.F0 = ev.F; pushHistory(ev.F, null);
-      log('start', `Starting design: ${ev.layers.map((L) => `${L.m} ${L.d.toFixed(1)} nm`).join(', ')} · F = ${fmt.sci(ev.F)}`);
+      if (ev.name) run.startName = ev.name;
+      log('start', `Starting design${ev.name ? ` «${ev.name}»` : ''}: ${ev.layers.map((L) => `${L.m} ${L.d.toFixed(1)} nm`).join(', ')} · F = ${fmt.sci(ev.F)}`);
       setStage('Initial refinement', 'running'); run.stage = 'Initial refinement';
       updateTiles({ F: ev.F, layers: ev.layers, stage: 'Initial refinement' });
       break;
@@ -304,33 +361,60 @@ function applyEvent(ev, snap) {
       view.highlight = null; syncStructure();
       break;
     }
+    case 'dense': {
+      run.dense = { F: ev.F, maxDev: ev.maxDev, points: ev.points };
+      updateTiles({ F: ev.Fgrid, layers: run.engineLayers });
+      log('dense', `Independent check on ${ev.points} points: F = <span class="v">${fmt.sci(ev.F)}</span> (grid F = ${fmt.sci(ev.Fgrid)}), max |ΔR| = ${(100 * ev.maxDev).toFixed(2)} p.p.`);
+      break;
+    }
+    case 'grid': {
+      run.problem = { grid: ev.wavelengths, target: ev.target, weights: ev.weights };
+      for (const w of ev.added) run.added.add(w);
+      spectrum.set({ grid: ev.wavelengths, target: ev.target, weights: ev.weights, added: run.added });
+      view.goalR = ev.R; view.R = Float64Array.from(ev.R);
+      layersFromEvent(ev.layers, { animate: !snap });
+      updateTiles({ F: ev.F, layers: ev.layers });
+      log('grid', `Grid enriched: +${ev.added.length} spectral points where the dense check found the largest errors (${ev.added.map((w) => w.toFixed(1)).join(', ')} nm) → ${ev.wavelengths.length} points. F on the new grid = ${fmt.sci(ev.F)}.`);
+      break;
+    }
     case 'scan': {
       view.scanTotal = ev.total;
       const scanLayers = toDisplayLayers(ev.layers);
       const c = ev.candidates[0] || null;
-      view.candidate = c ? { ...c, pulse: 0, label: `insert ${matLabel(c.nm)} at z = ${c.z.toFixed(1)} nm (g = ${(c.g).toExponential(2)})` } : null;
+      view.candidate = c ? { ...c, pulse: 0, label: `best g: ${matLabel(c.nm)} at z = ${c.z.toFixed(1)} nm (g = ${(c.g).toExponential(2)})` } : null;
       needle.set({ scan: { z: ev.z, g: ev.g, layer: ev.layer }, layers: scanLayers, candidate: view.candidate, insertion: null, stale: false });
       view.insertion = null;
       view.goalXmax = Math.max(view.goalXmax, ev.total * 1.06);
       break;
     }
+    case 'compare': {
+      const rows = ev.trials.map((t) => {
+        const where = t.kind === 'interior' ? `layer ${t.layer + 1}` : t.kind === 'substrate' ? 'substrate side' : 'air side';
+        const ok = t.ok && t.Frefined != null;
+        const gain = ok ? `${(100 * (1 - t.Frefined / ev.parentF)).toFixed(1)} %` : '—';
+        return { ok, html: `<tr><td>${t.material} in ${where}</td><td>${t.z.toFixed(1)} nm</td><td>${t.g.toExponential(2)}</td><td>${ok ? fmt.sci(t.Frefined) : (t.why || 'rejected')}</td><td>${gain}</td></tr>`, F: ok ? t.Frefined : Infinity };
+      });
+      let bi = -1; rows.forEach((r, i) => { if (r.F < (bi < 0 ? Infinity : rows[bi].F)) bi = i; });
+      const table = `<table class="cmp"><tr><th>candidate</th><th>z</th><th>g, nm⁻¹</th><th>F after refinement</th><th>gain</th></tr>${rows.map((r, i) => r.html.replace('<tr>', i === bi && r.F < ev.parentF ? '<tr class="chosen">' : '<tr>')).join('')}</table>`;
+      log('compare', `${ev.trials.length} needle candidate${ev.trials.length > 1 ? 's' : ''} refined independently (parent F = ${fmt.sci(ev.parentF)}):${table}`);
+      break;
+    }
     case 'needle': {
       const c = ev.candidate;
-      // build display list: split host layer, inserted layer grows from zero
       const idx = ev.layers.findIndex((L) => L.inserted);
       const disp = toDisplayLayers(ev.layers);
       if (idx >= 0 && !snap) { disp[idx].d = 0; disp[idx].goal = ev.layers[idx].d; }
-      view.layers = disp; run.engineLayers = ev.layers;
+      view.layers = disp; run.engineLayers = ev.layers; view.curveDirty = true;
       view.highlight = { index: idx, kind: 'inserted', pulse: 1 };
       view.insertion = { z: c.z, width: snap ? ev.eta : 0, goal: ev.eta };
-      view.candidate = view.candidate ? { ...view.candidate, pulse: 1 } : null;
-      needle.set({ insertion: view.insertion, candidate: view.candidate });
+      view.candidate = { ...c, pulse: 1, label: `insert ${matLabel(c.nm)} at z = ${c.z.toFixed(1)} nm (g = ${c.g.toExponential(2)})` };
+      needle.set({ insertion: view.insertion, candidate: view.candidate, stale: false });
       view.goalR = ev.R; if (snap) view.R = Float64Array.from(ev.R);
       view.tauD = 0.35;
       pushHistory(ev.F, 'needle');
       updateTiles({ F: ev.F, layers: ev.layers });
       const where = c.kind === 'interior' ? `inside layer ${c.layer + 1}` : c.kind === 'substrate' ? 'at the substrate' : 'at the outer surface';
-      log('needle', `Needle of ${ev.material} inserted ${where}, z = <span class="v">${c.z.toFixed(1)} nm</span>, width ${ev.eta.toFixed(2)} nm · g = ${c.g.toExponential(2)} nm⁻¹ · F ${fmt.sci(ev.Fparent)} → ${fmt.sci(ev.F)}${ev.attempts > 1 ? ` (${ev.attempts} width trials)` : ''}.`);
+      log('needle', `Needle of ${ev.material} inserted ${where}, z = <span class="v">${c.z.toFixed(1)} nm</span>, width ${ev.eta.toFixed(2)} nm · g = ${c.g.toExponential(2)} nm⁻¹ · F ${fmt.sci(ev.Fparent)} → ${fmt.sci(ev.F)}${ev.alternatives > 1 ? ` · best of ${ev.alternatives} refined alternatives` : ''}.`);
       break;
     }
     case 'needle-rejected': {
@@ -367,14 +451,17 @@ function applyEvent(ev, snap) {
       view.highlight = null; view.insertion = null; syncStructure();
       needle.set({ insertion: null, candidate: null, stale: true });
       pushHistory(ev.F, 'done');
+      if (ev.dense) run.dense = { F: ev.dense.F, maxDev: ev.dense.maxDev, points: ev.dense.wavelengths.length };
+      run.problem = { grid: ev.grid.wavelengths, target: ev.grid.target, weights: ev.grid.weights };
       updateTiles({ F: ev.F, layers: ev.layers, stage: 'Finished' });
-      run.lastResult = { layers: ev.layers, R: ev.R, F: ev.F, reason: ev.reason, stats: ev.stats };
+      run.lastResult = { layers: ev.layers, R: ev.R, F: ev.F, reason: ev.reason, stats: ev.stats, dense: ev.dense, grid: ev.grid, elapsedMs: ev.elapsedMs };
       run.finished = true; run.running = false;
-      const ok = ev.F <= settings.targetMerit;
+      const ok = ev.F <= settings.targetMerit && (!ev.dense || ev.dense.F <= settings.targetMerit);
       setStage(`Finished — ${ev.reason}`, 'done');
-      const rl = $('result-line'); rl.textContent = `${ev.reason}. ${ev.layers.length} layers, F = ${fmt.sci(ev.F)}, RMS ${(100 * Math.sqrt(ev.F)).toFixed(3)} %, optical thickness ${ev.opticalThickness.toFixed(0)} nm. Needles ${ev.stats.needles}, growth steps ${ev.stats.growths}, thin layers removed ${ev.stats.cleanups}.`;
+      const rl = $('result-line');
+      rl.textContent = `${run.startName ? `Start «${run.startName}»${run.exploreRanked ? ` (best of ${run.exploreRanked.length})` : ''}. ` : ''}${ev.reason}. ${ev.layers.length} layers, F = ${fmt.sci(ev.F)}, RMS ${(100 * Math.sqrt(ev.F)).toFixed(3)} %${ev.dense ? ` (dense grid ${(100 * Math.sqrt(ev.dense.F)).toFixed(3)} %, max ${(100 * ev.dense.maxDev).toFixed(2)} p.p.)` : ''}, optical thickness ${ev.opticalThickness.toFixed(0)} nm.`;
       rl.classList.toggle('good', ok);
-      log('done', `${ev.reason}. Final design: ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>.`);
+      log('done', `${ev.reason}. Final design: ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>${ev.dense ? `, dense‑grid F = ${fmt.sci(ev.dense.F)}` : ''}. Needles ${ev.stats.needles} (of ${ev.stats.compared} refined alternatives), growth steps ${ev.stats.growths}, thin layers removed ${ev.stats.cleanups}${ev.stats.pointsAdded ? `, grid points added ${ev.stats.pointsAdded}` : ''}, ${(ev.elapsedMs / 1000).toFixed(1)} s of computation.`);
       $('btn-run').textContent = 'Start synthesis'; $('btn-export').disabled = false; $('btn-step').disabled = true;
       unlockSidebar();
       break;
@@ -382,8 +469,6 @@ function applyEvent(ev, snap) {
     default: break;
   }
 }
-function syncStructure() { structure.set({ layers: view.layers, xmax: view.xmax, highlight: view.highlight }); }
-function matLabel(n) { return n === materialH().n ? materialH().label : materialL().label; }
 
 /* ------------------------------------------------------------------ */
 /*  Runner                                                             */
@@ -394,23 +479,67 @@ function unlockSidebar() { $('sidebar').classList.remove('locked'); spectrum.set
 function startRun() {
   if (!validate()) return;
   setInitialDesign();
-  const { grid, target, weights } = run.problem;
-  const H = { n: materialH().n, m: materialH().key }, L = { n: materialL().n, m: materialL().key };
-  run.gen = synthesize({
-    wavelengths: grid, target, weights, ns: substrate().n, na: 1,
-    materials: { H, L },
-    start: { material: startMat().key, thickness: settings.startThickness },
-    maxLayers: settings.maxLayers, maxOpticalThickness: settings.maxTOT, targetMerit: settings.targetMerit,
-    thinLayer: settings.thinLayer, needleWidth: settings.needleWidth, candidates: settings.candidates,
-  });
+  run.cfg = engineConfig();
   run.running = true; run.paused = false; run.finished = false; run.holdUntil = 0; run.cycle = 0; run.stepTo = null;
   lockSidebar();
   $('btn-run').textContent = 'Pause'; $('btn-step').disabled = false; $('btn-export').disabled = true;
-  setStage('Starting…', 'running');
+  if (settings.startMode === 'multi') startExploration();
+  else { run.gen = synthesize(run.cfg); setStage('Starting…', 'running'); }
+}
+
+function startExploration() {
+  const cfg = { ...run.cfg, budgetMs: 1000 * settings.exploreBudget };
+  const list = startDesigns(cfg, lambdaCenter());
+  run.exploring = true; run.gen = null; run.exploreResults = [];
+  const ol = $('explore-list'); ol.hidden = false; ol.innerHTML = ''; document.querySelector('#card-stats .tiles').hidden = true;
+  list.forEach((s, i) => { const li = document.createElement('li'); li.id = `explore-${i}`; li.innerHTML = `<span class="n">${i + 1}. ${s.name}</span><span class="f">—</span><span class="l"></span>`; ol.appendChild(li); });
+  setStage(`Exploring ${list.length} starting designs in the background…`, 'running');
+  $('cycle-label').textContent = 'Exploration';
+  log('explore', `Multi‑start: ${list.length} starting designs, up to ${settings.exploreBudget} s each. The best result is replayed afterwards.`);
+  const onEvent = (ev) => {
+    if (!run.exploring) return;
+    if (ev.type === 'explore-start') {
+      const li = $(`explore-${ev.index}`); if (li) li.classList.add('running');
+      setStage(`Exploring starting design ${ev.index + 1} of ${ev.total}: ${ev.name}`, 'running');
+    } else if (ev.type === 'explore-result') {
+      run.exploreResults.push(ev);
+      const li = $(`explore-${ev.index}`);
+      if (li) { li.classList.remove('running'); li.querySelector('.f').textContent = `F ${fmt.sci(ev.score)}`; li.querySelector('.l').textContent = `${ev.layers.length} L`; }
+      log('explore', `Start «${ev.name}»: ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>${ev.Fdense != null ? ` (dense ${fmt.sci(ev.Fdense)})` : ''}, ${ev.reason.toLowerCase()}, ${(ev.elapsedMs / 1000).toFixed(1)} s.`);
+    } else if (ev.type === 'explore-done') {
+      run.exploring = false;
+      if (run.worker) { run.worker.terminate(); run.worker = null; }
+      const best = ev.best;
+      ev.results.forEach((r, rank) => { const li = $(`explore-${r.index}`); if (li) { li.classList.toggle('best', rank === 0); if (rank === 0) li.querySelector('.n').textContent = `★ ${r.name}`; } });
+      log('explore', `Best starting design: «${best.name}» (F = ${fmt.sci(best.F)}, ${best.layers.length} layers). Replaying its evolution.`);
+      run.startName = best.name; run.exploreRanked = ev.results;
+      $('explore-list').hidden = true; document.querySelector('#card-stats .tiles').hidden = false; $('btn-starts').hidden = false;
+      run.gen = synthesize({ ...run.cfg, start: { ...best.start, name: best.name } });
+      run.holdUntil = 0;
+      setStage(`Replaying the best start: ${best.name}`, 'running');
+    } else if (ev.type === 'explore-error') {
+      log('note', `Exploration failed: ${ev.message}. Falling back to the single starting layer.`);
+      run.exploring = false; if (run.worker) { run.worker.terminate(); run.worker = null; }
+      run.gen = synthesize(run.cfg);
+    }
+  };
+  try {
+    const w = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+    w.onmessage = (e) => onEvent(e.data);
+    w.onerror = (e) => { onEvent({ type: 'explore-error', message: e.message || 'worker error' }); };
+    w.postMessage(cfg);
+    run.worker = w;
+  } catch (err) {
+    // no worker support: run the exploration cooperatively on the main thread
+    const it = explore(cfg);
+    const step = () => { if (!run.exploring) return; const r = it.next(); if (r.done) return; onEvent(r.value); setTimeout(step, 0); };
+    setTimeout(step, 0);
+  }
 }
 
 function resetRun() {
-  run.gen = null; run.running = false; run.paused = false; run.finished = false; run.stepTo = null;
+  run.gen = null; run.running = false; run.paused = false; run.finished = false; run.stepTo = null; run.exploring = false;
+  if (run.worker) { run.worker.terminate(); run.worker = null; }
   unlockSidebar();
   validate();
   setInitialDesign();
@@ -426,7 +555,7 @@ function pullEvent(snap) {
   return r.value;
 }
 
-const SIGNIFICANT = new Set(['scan', 'needle', 'growth', 'cleanup', 'done', 'refined']);
+const SIGNIFICANT = new Set(['scan', 'compare', 'needle', 'growth', 'cleanup', 'grid', 'done', 'refined']);
 
 function frame(now) {
   requestAnimationFrame(frame);
@@ -434,7 +563,6 @@ function frame(now) {
   const factor = SPEED[run.speed];
   if (run.gen && (run.running && !run.paused || run.stepTo)) {
     if (run.stepTo) {
-      // advance until the next significant event, then pause
       for (let i = 0; i < 20000; i++) { const ev = pullEvent(true); if (!ev || SIGNIFICANT.has(ev.type)) break; }
       run.stepTo = null; run.paused = true; if (!run.finished) { $('btn-run').textContent = 'Resume'; setStage(`${$('stage-text').textContent} · paused`, 'paused'); }
     } else if (factor === 0) {
@@ -453,7 +581,6 @@ function frame(now) {
 }
 
 function animate(dt, snap) {
-  // reflectance
   if (view.goalR) {
     if (!view.R || view.R.length !== view.goalR.length) view.R = Float64Array.from(view.goalR);
     const a = snap ? 1 : 1 - Math.exp(-dt / view.tauR);
@@ -461,7 +588,6 @@ function animate(dt, snap) {
     for (let i = 0; i < view.R.length; i++) { const d = view.goalR[i] - view.R[i]; if (Math.abs(d) > 1e-7) { view.R[i] += d * a; moved = true; } }
     if (moved || snap) spectrum.set({ R: view.R });
   }
-  // layers
   let moved = false;
   const a = snap ? 1 : 1 - Math.exp(-dt / view.tauD);
   for (const L of view.layers) { const d = L.goal - L.d; if (Math.abs(d) > 1e-4) { L.d += d * a; moved = true; } else if (L.d !== L.goal) { L.d = L.goal; moved = true; } }
@@ -472,7 +598,9 @@ function animate(dt, snap) {
   if (moved) {
     structure.set({ layers: view.layers, xmax: view.xmax, highlight: view.highlight });
     needle.set({ xmax: view.xmax });
+    view.curveDirty = true;
   }
+  updateCurve(false);
 }
 
 /* ------------------------------------------------------------------ */
@@ -480,11 +608,17 @@ function animate(dt, snap) {
 /* ------------------------------------------------------------------ */
 function exportExcel() {
   const res = run.lastResult; if (!res) return;
-  const { grid, target } = run.problem;
-  let md = 0; for (let i = 0; i < grid.length; i++) md = Math.max(md, Math.abs(res.R[i] - target[i]));
+  const grid = res.grid ? res.grid.wavelengths : run.problem.grid, target = res.grid ? res.grid.target : run.problem.target, weights = res.grid ? res.grid.weights : run.problem.weights;
+  let md = 0; for (let i = 0; i < grid.length; i++) if (weights[i] > 0) md = Math.max(md, Math.abs(res.R[i] - target[i]));
   const bytes = resultWorkbook({
-    settings: { version: VERSION, substrate: substrate(), H: materialH(), L: materialL(), lambdaMin: settings.lambdaMin, lambdaMax: settings.lambdaMax, lambdaCenter: (settings.lambdaMin + settings.lambdaMax) / 2, points: settings.points, bands: settings.bands, startMaterial: startMat(), startThickness: settings.startThickness, maxLayers: settings.maxLayers, maxTOT: settings.maxTOT, targetMerit: settings.targetMerit, thinLayer: settings.thinLayer },
-    wavelengths: grid, target, R: res.R, layers: res.layers, result: { F: res.F, maxDev: md, reason: res.reason || 'Intermediate design (synthesis not finished)', stats: res.stats },
+    settings: {
+      version: VERSION, substrate: substrate(), H: materialH(), L: materialL(), lambdaMin: settings.lambdaMin, lambdaMax: settings.lambdaMax, lambdaCenter: lambdaCenter(), points: settings.points, bands: settings.bands,
+      transition: settings.transition, startMaterial: startMat(), startThickness: settings.startThickness, startMode: settings.startMode, startName: run.startName, maxLayers: settings.maxLayers, maxTOT: settings.maxTOT, targetMerit: settings.targetMerit, thinLayer: settings.thinLayer,
+      candidates: settings.candidates, denseCheck: settings.denseCheck, enrichGrid: settings.enrichGrid,
+    },
+    wavelengths: grid, target, weights, R: res.R, layers: res.layers,
+    result: { F: res.F, maxDev: md, reason: res.reason || 'Intermediate design (synthesis not finished)', stats: res.stats, dense: res.dense, elapsedMs: res.elapsedMs },
+    starts: run.exploreResults,
   });
   const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -493,9 +627,15 @@ function exportExcel() {
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
+function showStarts() {
+  const rows = (run.exploreRanked || []).map((r, i) => `<tr class="${i === 0 ? 'best' : ''}"><td>${i + 1}. ${r.name}</td><td>${fmt.sci(r.F)}</td><td>${r.Fdense != null ? fmt.sci(r.Fdense) : '—'}</td><td>${r.layers.length}</td><td>${r.opticalThickness.toFixed(0)}</td><td>${(r.elapsedMs / 1000).toFixed(1)}</td><td>${r.reason}</td></tr>`);
+  $('starts-table').innerHTML = `<thead><tr><th>Starting design</th><th>F</th><th>dense F</th><th>layers</th><th>nd, nm</th><th>s</th><th>termination</th></tr></thead><tbody>${rows.join('')}</tbody>`;
+  $('starts-dialog').showModal();
+}
+
 function showRecipe() {
   const layers = run.engineLayers || [];
-  const lc = (settings.lambdaMin + settings.lambdaMax) / 2;
+  const lc = lambdaCenter();
   let z = 0;
   const rows = layers.map((L, i) => { const r = `<tr><td>${i + 1}</td><td>${L.m}</td><td>${L.n.toFixed(2)}</td><td>${L.d.toFixed(2)}</td><td>${(L.n * L.d).toFixed(1)}</td><td>${(4 * L.n * L.d / lc).toFixed(3)}</td><td>${z.toFixed(1)}</td></tr>`; z += L.d; return r; });
   $('recipe').innerHTML = `<thead><tr><th>#</th><th>Material</th><th>n</th><th>d, nm</th><th>nd, nm</th><th>QWOT @ ${lc.toFixed(0)} nm</th><th>z, nm</th></tr></thead><tbody>${rows.join('')}</tbody>
@@ -518,22 +658,24 @@ function init() {
     for (const o of $('yscale').querySelectorAll('button')) o.classList.toggle('active', o === b);
   });
   $('btn-run').addEventListener('click', () => {
-    if (!run.gen || run.finished) { startRun(); return; }
+    if ((!run.gen && !run.exploring) || run.finished) { startRun(); return; }
     run.paused = !run.paused;
     $('btn-run').textContent = run.paused ? 'Resume' : 'Pause';
-    if (run.paused) setStage(`${$('stage-text').textContent.replace(' · paused', '')} · paused`, 'paused');
+    if (run.paused) setStage(`${$('stage-text').textContent} · paused`, 'paused');
     else { setStage($('stage-text').textContent.replace(' · paused', ''), 'running'); run.holdUntil = 0; }
   });
   $('btn-step').addEventListener('click', () => {
-    if (!run.gen || run.finished) { if (!validate()) return; startRun(); run.paused = true; }
-    run.stepTo = true;
+    if ((!run.gen && !run.exploring) || run.finished) { if (!validate()) return; startRun(); run.paused = true; }
+    if (run.gen) run.stepTo = true;
   });
   $('btn-reset').addEventListener('click', resetRun);
   $('btn-export').addEventListener('click', exportExcel);
   $('btn-recipe').addEventListener('click', showRecipe);
   $('recipe-close').addEventListener('click', () => $('recipe-dialog').close());
+  $('btn-starts').addEventListener('click', showStarts);
+  $('starts-close').addEventListener('click', () => $('starts-dialog').close());
   document.addEventListener('keydown', (e) => {
-    if (e.target !== document.body) return; // avoid double activation of focused buttons
+    if (e.target !== document.body) return;
     if (e.code === 'Space') { e.preventDefault(); $('btn-run').click(); }
     if (e.key === 'n' || e.key === 'N') $('btn-step').click();
   });
@@ -541,5 +683,4 @@ function init() {
 }
 
 init();
-// debugging / automation handle
 window.msAstra = { settings, run, view, spectrum, needle, structure, meritChart, VERSION };
