@@ -89,6 +89,7 @@ a:hover { text-decoration: underline; }
 .brand { display: flex; align-items: center; gap: 12px; min-width: 250px; }
 .brand h1 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
 .brand p { font-size: 12px; color: var(--ink-3); }
+.brand .version { font-size: 11px; font-weight: 600; color: var(--ink-2); background: var(--control); border-radius: 999px; padding: 2px 8px; margin-left: 6px; vertical-align: middle; font-variant-numeric: tabular-nums; }
 .stage-indicator { flex: 1; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-2); min-width: 0; }
 .stage-indicator .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink-3); flex: none; transition: background .3s; }
 .stage-indicator.running .dot { background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); animation: pulse 1.4s ease-in-out infinite; }
@@ -251,6 +252,13 @@ input.switch:checked::after { transform: translateX(16px); }
 .log table.cmp tr.chosen td { color: var(--ink); font-weight: 600; }
 #card-stats { overflow: auto; }
 #card-stats .result { flex: none; }
+.start-label { margin: 0 16px 6px; font-size: 12px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; min-height: 18px; }
+.start-label .badge { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; border-radius: 6px; padding: 2px 6px; background: var(--control); color: var(--ink-2); flex: none; }
+.start-label .badge.multi { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.result .check { color: var(--good); }
+.result .check.bad { color: var(--bad); }
+.log li.check .tag { background: color-mix(in srgb, var(--good) 14%, transparent); color: var(--good); }
+.log li.check.bad .tag { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
 #starts-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
 #starts-table th, #starts-table td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--line); }
 #starts-table th:first-child, #starts-table td:first-child, #starts-table th:last-child, #starts-table td:last-child { text-align: left; }

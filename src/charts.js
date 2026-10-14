@@ -243,9 +243,10 @@ export class SpectrumChart extends Plot {
         const hl = i === s.ghostHighlight;
         ctx.beginPath();
         for (let k = 0; k < gh.wl.length; k++) { const x = xs(gh.wl[k]), y = ys(gh.R[k]); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+        // multi-start lines share the line width of the synthesis curve (2.25 px); only colour and dash differ
         if (hl) { ctx.strokeStyle = T.needle; ctx.lineWidth = 2.5; ctx.globalAlpha = 1; ctx.setLineDash([]); }
-        else if (gh.best) { ctx.strokeStyle = T.good; ctx.lineWidth = 1.8; ctx.globalAlpha = 0.85; ctx.setLineDash([6, 4]); }
-        else { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 1.2; ctx.globalAlpha = 0.45; ctx.setLineDash([4, 4]); }
+        else if (gh.best) { ctx.strokeStyle = T.good; ctx.lineWidth = 2.25; ctx.globalAlpha = 0.9; ctx.setLineDash([7, 5]); }
+        else { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 2.25; ctx.globalAlpha = 0.4; ctx.setLineDash([7, 5]); }
         ctx.stroke(); ctx.globalAlpha = 1; ctx.setLineDash([]);
       }
       const hl = s.ghostHighlight != null ? s.ghosts[s.ghostHighlight] : null;
