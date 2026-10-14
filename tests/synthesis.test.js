@@ -188,3 +188,22 @@ test('a budget-limited exploration result is replayed deterministically', () => 
     assert.equal(done.reason, r.reason);
   }
 });
+
+test('the built-in self-check of the termination reason passes for every preset and start mode', () => {
+  for (const key of Object.keys(PRESETS)) for (const tm of [PRESETS[key].merit, 1e-9]) {
+    const cfg = presetConfig(key, tm);
+    const { done } = runAll(cfg);
+    assert.ok(done.stop.checks.length >= 2);
+    const failed = done.stop.checks.filter((c) => !c.ok);
+    assert.equal(failed.length, 0, `${key} (${tm}): ${failed.map((c) => `${c.name} [${c.detail}]`).join('; ')} — reason: ${done.reason}`);
+    assert.equal(done.stop.verified, true);
+  }
+  // multi-start winner, replayed: identical reason and verified
+  const cfg = { ...presetConfig('mirror', 1e-9), budgetMs: 4000 };
+  let final = null; for (const ev of explore(cfg)) if (ev.type === 'explore-done') final = ev;
+  const b = final.best;
+  const replay = { ...cfg, start: b.start, budgetMs: Infinity, ...(b.stopKind === 'budget' ? { maxRefinements: b.refinements, budgetReason: b.baseReason } : {}) };
+  const { done } = runAll(replay);
+  assert.equal(done.reason, b.reason);
+  assert.equal(done.stop.verified, true, done.stop.checks.filter((c) => !c.ok).map((c) => c.name).join('; '));
+});

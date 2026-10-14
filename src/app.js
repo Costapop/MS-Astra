@@ -9,7 +9,7 @@ import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
 
-export const VERSION = '2.2.0';
+export const VERSION = '2.2.1';
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------------ */
@@ -275,6 +275,9 @@ function setInitialDesign() {
   $('cycle-label').textContent = 'Not started';
   $('explore-list').hidden = true; $('explore-list').innerHTML = ''; $('btn-starts').hidden = true; document.querySelector('#card-stats .tiles').hidden = false;
   run.ghosts = []; view.hideCurve = false; spectrum.set({ ghosts: [], ghostHighlight: null }); $('legend-ghost').hidden = true;
+  if (settings.startMode === 'multi') startLabel(`10 starting designs will be explored in the background; the winner is replayed`, true);
+  else startLabel(`${sm.label} ${settings.startThickness} nm`, false);
+  $('stage-text').title = '';
   needle.set({ annotations: null, banner: null });
   $('log').innerHTML = ''; run.logExpanded = false; $('btn-log-all').hidden = true;
   $('btn-export').disabled = true;
@@ -309,7 +312,7 @@ function setStageEntry(text, cls) {
 function logEntry(kind, html) {
   const ol = $('log');
   const li = document.createElement('li'); li.className = kind;
-  li.innerHTML = `<span class="tag">${kind}</span><span>${html}</span>`;
+  li.innerHTML = `<span class="tag">${kind.split(" ")[0]}</span><span>${html}</span>`;
   ol.appendChild(li);
   while (ol.children.length > 400) ol.removeChild(ol.firstChild);
   updateLogView();
@@ -335,6 +338,7 @@ function updateCurve(force) {
   spectrum.set({ curve: view.curve });
 }
 
+function startLabel(html, multi) { $('start-label').innerHTML = `<span class="badge${multi ? ' multi' : ''}">${multi ? 'Multi‑start' : 'Single layer'}</span><span>${html}</span>`; }
 function syncStructure() { structure.set({ layers: view.layers, xmax: view.xmax, highlight: view.highlight }); }
 function highlightGhost(index) {
   const list = run.ghosts.filter(Boolean);
@@ -511,14 +515,19 @@ function applyEvent(ev, snap, opts = {}) {
       if (ev.dense) run.dense = { F: ev.dense.F, maxDev: ev.dense.maxDev, points: ev.dense.wavelengths.length };
       run.problem = { grid: ev.grid.wavelengths, target: ev.grid.target, weights: ev.grid.weights };
       updateTiles({ F: ev.F, layers: ev.layers, stage: `Finished · ${ev.reason.split(' · ')[0]}` }); $('cycle-label').title = ev.reason;
-      run.lastResult = { layers: ev.layers, R: ev.R, F: ev.F, reason: ev.reason, stats: ev.stats, dense: ev.dense, grid: ev.grid, elapsedMs: ev.elapsedMs };
+      run.lastResult = { layers: ev.layers, R: ev.R, F: ev.F, reason: ev.reason, stop: ev.stop, stats: ev.stats, dense: ev.dense, grid: ev.grid, elapsedMs: ev.elapsedMs };
       run.finished = true; run.running = false;
       if (!quiet) { timerPause(); timerDraw(); }
       const ok = ev.F <= settings.targetMerit && (!ev.dense || ev.dense.F <= settings.targetMerit);
       setStage(`Finished — ${ev.reason.split(' · ')[0]}`, 'done'); $('stage-text').title = ev.reason;
       const rl = $('result-line');
-      rl.innerHTML = `<b>${ev.reason}.</b> ${run.startName ? `Start «${run.startName}»${run.exploreRanked ? ` (best of ${run.exploreRanked.length})` : ''}. ` : ''}${ev.layers.length} layers, F = ${fmt.sci(ev.F)}, RMS ${(100 * Math.sqrt(ev.F)).toFixed(3)} %${ev.dense ? ` (dense grid ${(100 * Math.sqrt(ev.dense.F)).toFixed(3)} %, max ${(100 * ev.dense.maxDev).toFixed(2)} p.p.)` : ''}, optical thickness ${ev.opticalThickness.toFixed(0)} nm.`;
+      const checks = ev.stop && ev.stop.checks ? ev.stop.checks : [];
+      const failed = checks.filter((c) => !c.ok);
+      const checkHtml = checks.length ? (failed.length ? `<span class="check bad" title="${failed.map((c) => `${c.name} (${c.detail})`).join('; ')}">⚠ reason check failed (${failed.length} of ${checks.length})</span>` : `<span class="check" title="${checks.map((c) => c.name).join('; ')}">✓ reason verified (${checks.length} checks)</span>`) : '';
+      const startInfo = settings.startMode === 'multi' ? `Multi‑start: winner «${run.startName}» of ${run.exploreRanked ? run.exploreRanked.length : 10}. ` : `Single‑layer start ${startMat().label} ${settings.startThickness} nm. `;
+      rl.innerHTML = `<b>${ev.reason}.</b> ${checkHtml} ${startInfo}${ev.layers.length} layers, F = ${fmt.sci(ev.F)}, RMS ${(100 * Math.sqrt(ev.F)).toFixed(3)} %${ev.dense ? ` (dense grid ${(100 * Math.sqrt(ev.dense.F)).toFixed(3)} %, max ${(100 * ev.dense.maxDev).toFixed(2)} p.p.)` : ''}, optical thickness ${ev.opticalThickness.toFixed(0)} nm.`;
       rl.classList.toggle('good', ok);
+      if (checks.length) log(failed.length ? 'check bad' : 'check', `Termination reason self‑check: ${failed.length ? `${failed.length} of ${checks.length} checks failed` : `all ${checks.length} checks passed`}.<table class="cmp"><tr><th>check</th><th>result</th><th>detail</th></tr>${checks.map((c) => `<tr><td>${c.name}</td><td>${c.ok ? '✓' : '✗'}</td><td>${c.detail || ''}</td></tr>`).join('')}</table>`);
       log('done', `${ev.reason}. Final design: ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>${ev.dense ? `, dense‑grid F = ${fmt.sci(ev.dense.F)}` : ''}. Needles ${ev.stats.needles} (of ${ev.stats.compared} refined alternatives), growth steps ${ev.stats.growths}, thin layers removed ${ev.stats.cleanups}${ev.stats.pointsAdded ? `, grid points added ${ev.stats.pointsAdded}` : ''}, ${(ev.elapsedMs / 1000).toFixed(1)} s of computation.`);
       $('btn-run').textContent = 'Start synthesis'; $('btn-export').disabled = false; $('btn-step').disabled = true;
       unlockSidebar();
@@ -566,6 +575,7 @@ function startExploration() {
   });
   view.hideCurve = false; spectrum.set({ curveDashed: true, ghosts: run.ghosts, ghostHighlight: null }); $('legend-ghost').hidden = false;
   setStageEntry(`Exploring ${list.length} starting designs in the background…`, 'running');
+  $('btn-run').textContent = 'Exploring…'; $('btn-run').disabled = true; $('btn-step').disabled = true;
   $('cycle-label').textContent = 'Exploration';
   logEntry('explore', `Multi‑start: ${list.length} starting designs, up to ${settings.exploreBudget} s each. The best result is replayed afterwards.`);
   const onEvent = (ev) => {
@@ -573,6 +583,7 @@ function startExploration() {
     if (ev.type === 'explore-start') {
       const li = $(`explore-${ev.index}`); if (li) li.classList.add('running');
       run.exploreLabel = `Start ${ev.index + 1}/${ev.total} «${ev.name}»`; run.cycle = 0;
+      startLabel(`exploring ${ev.index + 1} of ${ev.total}: ${ev.name}`, true);
       setStageEntry(`${run.exploreLabel} · starting`, 'running');
       $('cycle-label').textContent = `Exploration ${ev.index + 1}/${ev.total}`;
     } else if (ev.type === 'explore-event') {
@@ -593,6 +604,7 @@ function startExploration() {
       ev.results.forEach((r, rank) => { const li = $(`explore-${r.index}`); if (li) { li.classList.toggle('best', rank === 0); if (rank === 0) li.querySelector('.n').textContent = `★ ${r.name}`; } });
       logEntry('explore', `Best starting design: «${best.name}» (F = ${fmt.sci(best.F)}, ${best.layers.length} layers). Replaying its evolution.`);
       run.startName = best.name; run.exploreRanked = ev.results;
+      startLabel(`${ev.results.length} designs explored → winner «${best.name}» (F = ${fmt.sci(best.F)}, ${best.layers.length} layers), now replayed`, true);
       document.querySelector('#card-stats .tiles').hidden = false; $('btn-starts').hidden = false; $('explore-list').classList.remove('exploring');
       run.exploreLabel = null; run.cycle = 0;
       // restore the optimization grid shown on the chart (previews may have enriched their own grids) and switch to the solid synthesis curve
@@ -604,12 +616,14 @@ function startExploration() {
       const replayCfg = { ...run.cfg, start: { ...best.start, name: best.name } };
       if (best.stopKind === 'budget') { replayCfg.maxRefinements = best.refinements; replayCfg.budgetReason = best.baseReason; }
       run.gen = synthesize(replayCfg);
-      run.holdUntil = 0;
+      run.holdUntil = 0; run.paused = false;
+      $('btn-run').textContent = 'Pause'; $('btn-run').disabled = false; $('btn-step').disabled = false;
       setStageEntry(`Replaying the best start: ${best.name}`, 'running');
     } else if (ev.type === 'explore-error') {
       logEntry('note', `Exploration failed: ${ev.message}. Falling back to the single starting layer.`);
       run.exploring = false; if (run.worker) { run.worker.terminate(); run.worker = null; }
-      run.gen = synthesize(run.cfg);
+      run.gen = synthesize(run.cfg); run.paused = false;
+      $('btn-run').textContent = 'Pause'; $('btn-run').disabled = false; $('btn-step').disabled = false;
     }
   };
   try {
@@ -633,7 +647,7 @@ function resetRun() {
   unlockSidebar();
   validate();
   setInitialDesign();
-  $('btn-run').textContent = 'Start synthesis'; $('btn-step').disabled = false;
+  $('btn-run').textContent = 'Start synthesis'; $('btn-run').disabled = false; $('btn-step').disabled = false;
   setStageEntry('Ready — draw the target and press Start', '');
 }
 
@@ -738,6 +752,7 @@ function showRecipe() {
 /*  Wiring                                                             */
 /* ------------------------------------------------------------------ */
 function init() {
+  $('version-badge').textContent = `v${VERSION}`; $('version-badge').title = `MS Astra release ${VERSION}`;
   applyPreset(DEFAULTS.preset);
   bindForm(); syncForm(); validate(); setInitialDesign();
   for (const b of $('speed').querySelectorAll('button')) b.addEventListener('click', () => {

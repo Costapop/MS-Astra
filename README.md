@@ -84,6 +84,6 @@ Serve the files over HTTP (the application uses JavaScript modules).
 - `src/xlsx.js` — dependency‑free Excel writer.
 - `tests/` — verification against closed forms, an independent matrix code, finite differences, the specification's worked example and the book's designs.
 
-Release notes: [docs/RELEASE-v2.2.0.md](docs/RELEASE-v2.2.0.md), [v2.1.3](docs/RELEASE-v2.1.3.md), [v2.1.1](docs/RELEASE-v2.1.1.md), [v2.1.0](docs/RELEASE-v2.1.0.md), [v2.0.0](docs/RELEASE-v2.0.0.md). The source
+Release notes: [docs/RELEASE-v2.2.1.md](docs/RELEASE-v2.2.1.md), [v2.2.0](docs/RELEASE-v2.2.0.md), [v2.1.3](docs/RELEASE-v2.1.3.md), [v2.1.1](docs/RELEASE-v2.1.1.md), [v2.1.0](docs/RELEASE-v2.1.0.md), [v2.0.0](docs/RELEASE-v2.0.0.md). The source
 books and the private method specification are not distributed with this
 repository.

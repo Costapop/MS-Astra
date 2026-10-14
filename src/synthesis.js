@@ -282,13 +282,13 @@ export function* synthesize(cfg) {
 
   // ---------------- final: cleanup + final refinement, report best ----------------
   yield { type: 'stage', stage: 'final' };
-  let fromArchive = null;
+  let fromArchive = null, finalCleanupRemoved = 0;
   // use the archived design only when it is meaningfully better than the design at termination
   if (best && best.F < F * (1 - 1e-3)) { fromArchive = { cycle: best.cycle, F: best.F }; layers = copy(best.layers); F = best.F; }
   if (layers.some((L) => L.d < dMin) && layers.length > 1) {
     const { layers: cl, removed } = cleanThinLayers(layers, dMin);
     if (removed) {
-      stats.cleanups += removed;
+      stats.cleanups += removed; finalCleanupRemoved = removed;
       const Rc = reflectance(cl, problem.wavelengths, ns, na);
       yield { type: 'cleanup', removed, layers: copy(cl), R: Rc, F: merit(Rc, problem.target, problem.weights), before: copy(layers), final: true };
       const r5 = yield* doRefine(cl, 'Final refinement');
@@ -319,7 +319,10 @@ export function* synthesize(cfg) {
         : dcf && Ff <= targetF ? 'Target merit reached on the optimization grid but not on the dense check grid' : `Target merit was reached before the final cleanup; after it F = ${Ff.toExponential(2)}`;
       break;
     case 'budget': reason = budgetText(); break;
-    case 'tot': reason = `Optical‑thickness limit reached (${maxTOT} nm)`; break;
+    case 'tot':
+      reason = `Optical‑thickness limit reached (${maxTOT} nm)`;
+      if (!fromArchive && finalTOT < maxTOT - 1) reason += `; after the final cleanup and refinement the reported design has ${finalTOT.toFixed(0)} nm`;
+      break;
     case 'stagnation': reason = `No further progress in three cycles: ${needleText}${growthNote}`; break;
     default: reason = `Cycle budget exhausted (${maxCycles} cycles)`;
   }
@@ -358,6 +361,39 @@ export function* synthesize(cfg) {
       verdict = { kind: 'possible', text: `An insertion could still lower F by ${(100 * -b.delta).toFixed(1)} % (${b.material} at z = ${b.z.toFixed(1)} nm)${why}.` };
     }
     yield { type: 'final-scan', z: scanF.z, g: scanF.g, layer: scanF.layer, total: scanF.total, candidates: scanF.candidates.slice(0, 8), trials, verdict, layers: copy(layers), F: Ff };
+
+    // ---------------- self-check: the reported reason must be backed by the facts of the run ----------------
+    const checks = [];
+    const chk = (name, ok, detail) => checks.push({ name, ok: !!ok, detail });
+    const improvingNow = trials.filter((t) => t.delta != null && t.delta < -eps).length;
+    switch (stop.kind) {
+      case 'target':
+        if (/^Target merit reached \(/.test(stop.base)) chk('target reached on the optimization grid', Ff <= targetF, `F = ${Ff.toExponential(3)} vs ${targetF.toExponential(1)}`);
+        if (/^Target merit reached \(/.test(stop.base)) chk('target reached on the dense grid', !dcf || dcf.F <= targetF, dcf ? `F_dense = ${dcf.F.toExponential(3)}` : 'dense check off');
+        if (/not on the dense/.test(stop.base)) chk('grid passes, dense grid fails', Ff <= targetF && dcf && dcf.F > targetF, '');
+        break;
+      case 'tot':
+        chk('design at termination is at the optical‑thickness limit', terminal.opticalThickness >= maxTOT - 1e-6, `${terminal.opticalThickness.toFixed(1)} nm vs ${maxTOT} nm`);
+        if (!fromArchive) chk('reported design is at the optical‑thickness limit, or the reason states its thickness', finalTOT >= maxTOT - 1 || /reported design has/.test(reason), `${finalTOT.toFixed(1)} nm`);
+        break;
+      case 'stagnation':
+        chk('three cycles without progress recorded', noProgress >= 3, `${noProgress} cycles`);
+        if (stop.needleStop === 'layer-limit') chk('layer limit blocks interior needles', terminal.layers >= maxLayers - 1, `${terminal.layers} of ${maxLayers} layers at termination`);
+        if (stop.needleStop === 'stationary' && !fromArchive && !finalCleanupRemoved) chk('reported design is needle‑stationary', scanF.candidates.length === 0, `${scanF.candidates.length} negative minima`);
+        if (stop.needleStop === 'no-gain' && !fromArchive && !finalCleanupRemoved) chk('no tested needle improves the reported design', improvingNow === 0, `${improvingNow} improving of ${trials.length} tested`);
+        if (stop.growthCapped) chk('last growth step was capped by the optical‑thickness limit', stop.growthCapped, '');
+        break;
+      case 'budget':
+        chk('budget actually exhausted', Date.now() - t0 >= budgetMs || stats.refinements >= maxRefinements, Number.isFinite(maxRefinements) ? `${stats.refinements} refinements` : `${((Date.now() - t0) / 1000).toFixed(1)} s`);
+        break;
+      default:
+        chk('cycle budget exhausted', stats.cycles >= maxCycles, `${stats.cycles} cycles`);
+    }
+    chk('archive note present exactly when the reported design is the archived one', /best archived/.test(reason) === !!fromArchive, fromArchive ? `archived from cycle ${fromArchive.cycle}` : 'terminal design reported');
+    if (fromArchive) chk('archived design is better than the terminal one', Ff < terminal.F, `${Ff.toExponential(3)} < ${terminal.F.toExponential(3)}`);
+    chk('reported design respects the limits', layers.length <= maxLayers && finalTOT <= maxTOT + 1e-6, `${layers.length} layers, ${finalTOT.toFixed(1)} nm`);
+    chk('reported F equals an independent re‑evaluation', Math.abs(merit(reflectance(layers, problem.wavelengths, ns, na), problem.target, problem.weights) - Ff) <= 1e-15, '');
+    stop.checks = checks; stop.verified = checks.every((c) => c.ok);
   }
   const done = {
     type: 'done', layers: copy(layers), R: Rf, F: Ff, reason, stop, stats, opticalThickness: finalTOT,
