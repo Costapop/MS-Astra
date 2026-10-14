@@ -1,6 +1,6 @@
 # Mathematical method and verification
 
-MS Astra implements normal-incidence reflectance synthesis for a stack of two real, constant-index materials. This document describes the numerical model and the bounded search used by release 1.0. It distinguishes analytic identities from numerical search heuristics.
+MS Astra implements normal-incidence reflectance synthesis for a stack of two real, constant-index materials. This document describes the numerical model and the bounded search used by release 1.1. It distinguishes analytic identities from numerical search heuristics.
 
 ## 1. Assumptions, order, and objective
 
@@ -58,7 +58,7 @@ $$
 
 For these lossless media, $R+T=1$. At normal incidence the two polarization results coincide. An empty coating gives the Fresnel result $R=[(n_a-n_s)/(n_a+n_s)]^2$.
 
-The implementation stores a matrix as four real numbers $[a,b,c,d]$ representing $\left(\begin{smallmatrix}a&ib\\ic&d\end{smallmatrix}\right)$. This representation is closed under multiplication for the stated model; it preserves the complex phases without allocating general complex objects.
+The implementation stores a matrix as four real numbers $[a,b,c,d]$ representing $\left(\begin{smallmatrix}a&ib\\ic&d\end{smallmatrix}\right)$. This representation is closed under multiplication for the stated model; it preserves the complex phases without allocating general complex objects. To avoid amplified phase-rounding error in narrow resonances, the implementation computes $n_jd_j/\lambda$ with compensated product/division arithmetic and reduces the phase by an exact quarter cycle before evaluating sine and cosine. This improves accuracy near integer multiples of $\pi/2$ while leaving the physical model and analytic derivative formulas unchanged.
 
 **Verification:** Furman–Tikhonravov [1], §1.2.1, pp22–27, especially (1.2.9), (1.2.11), and (1.2.13)–(1.2.14). Tikhonravov [2], Appendix 1.1, printed pp102–107. The definition $n_jd_j$ is in [2], §1.1.1, printed p2.
 
@@ -160,7 +160,7 @@ $$
 
 The plotted derivative has units of MSE per nm. A negative value identifies a first-order descent direction. A finite insertion still requires an actual merit check.
 
-For an interior centered needle, the host remnants have thicknesses $x-\eta/2$ and $d_h-x-\eta/2$; hence $\eta\le2\min(x,d_h-x)$. At an endpoint the replacement is one-sided. The semi-infinite ambient and substrate are unchanged. A strict interior needle creates two additional layers; an endpoint needle can add one. Equal adjacent materials merge after zero-thickness layers disappear.
+For an interior centered needle, the host remnants have thicknesses $x-\eta/2$ and $d_h-x-\eta/2$; hence $\eta\le2\min(x,d_h-x)$. At an endpoint the replacement is one-sided. The semi-infinite ambient and substrate are unchanged. A strict interior needle creates two additional layers; an endpoint needle can add one. Algebraic normalization removes only exactly zero-thickness layers and merges equal adjacent materials. Strictly positive thin layers belong to the separate cleanup trial. When normalization changes a geometry, its spectrum and merit are recomputed; the best evaluated recipe is retained if floating-point rounding makes the normalized result worse.
 
 **Why replacement matters:** additive insertion without removing host material would have $K_{\mathrm{add}}=AG_mB$, and
 
@@ -174,7 +174,7 @@ The book's equivalent admittance/adjoint criterion is $g_m(z)=P(z)(n_m^2-n_h^2)$
 
 **Verification:** [1], §2.2.2, pp119–124, particularly (2.2.18)–(2.2.19) on p121; [2], Appendix 1.2, printed pp109–112, especially (A1.22)–(A1.29); [3], §§7–9, pp12–16.
 
-## 5. Search policy in release 1.0
+## 5. Search policy in release 1.1
 
 1. **Start and refine.** Begin with the user-selected single L or H layer. Refine all thicknesses with constrained LM and update the best-feasible archive.
 2. **Scan and insert.** Sample the analytic replacement derivative in each layer with geometric spacing no larger than $\lambda_{\min}/(32n_h)$ and at least eight intervals per layer. Retain endpoint directions in the scan and refine sampled interior minima by a bounded golden-section search. Before allocating the insertion-candidate budget, filter internal-interface replacements that merely shift an existing boundary into the adjacent material: these are thickness-refinement directions rather than new-layer insertions. The plotted scan still includes their derivatives. Rank the remaining candidates by most negative derivative; the insertion threshold is $g<-10^{-11}$nm$^{-1}$.
@@ -185,23 +185,29 @@ The book's equivalent admittance/adjoint criterion is $g_m(z)=P(z)(n_m^2-n_h^2)$
    The actual improvement must additionally exceed $\max(10^{-13},10^{-8}F_{\mathrm{parent}})$. Backtracking allows at most 18 widths, with a minimum width of $10^{-6}$nm. An accepted insertion must increase the normalized layer count. Refine the accepted new structure, then rescan. This is a bounded raw-Armijo policy; it does **not** refine every candidate independently and is not exhaustive deep search.
 4. **Grow.** When this bounded needle cycle ends, scan increasing thickness for each existing layer with the other layers fixed. Locate a negative-to-positive zero crossing of the analytic one-dimensional merit derivative and refine its bracket. This identifies a higher local thickness minimum. Among available candidates, take the one with the lowest resulting merit. Previously visited growth states are skipped.
 5. **Repeat.** Resume refinement and needle insertion from the grown structure. The current merit can increase at a growth step. Preserve the best feasible design separately.
-6. **Clean up and polish.** Return to the best archived design. Remove layers below the cleanup threshold as a trial, merge equal neighbors, and refine it. Keep cleanup only if its merit does not deteriorate beyond numerical tolerance. Perform final constrained refinement.
+6. **Clean up and polish.** Return to the best archived design. Remove layers below the cleanup threshold as a trial, merge equal neighbors, and refine it. Keep cleanup only if its recomputed merit does not increase. Retain the actual best evaluated recipe even when normalization changes only the last floating-point bits. Perform final constrained refinement.
 
 Default solver budgets are 70 LM iterations per refinement, eight ranked needle candidates, 32 accepted needles per outer cycle, and eight outer cycles. Cleanup allows 100 refinement iterations and final polishing 120. A growth search is limited to an added optical thickness of $2\lambda_{\max}$ per tested layer, also bounded by the remaining total optical thickness. The browser exposes outer-cycle and cleanup controls; presentation pace changes display timing, not the mathematical objective.
 
-Very small layers can remain if deleting them worsens the solution. Cleanup is accepted within an absolute merit tolerance of $10^{-13}$; it is not a guaranteed manufacturing minimum. Boundary movements excluded from structural insertion can still have nonzero derivatives when refinement has exhausted its numerical budget. The growth scan and finite candidate budgets can miss useful alternatives. The solver does not claim to have completed an exhaustive needle cycle if a numerical budget was reached.
+Very small layers can remain if deleting them worsens the solution. Cleanup must not increase the merit; it is not a guaranteed manufacturing minimum. Boundary movements excluded from structural insertion can still have nonzero derivatives when refinement has exhausted its numerical budget. The growth scan and finite candidate budgets can miss useful alternatives. The solver does not claim to have completed an exhaustive needle cycle if a numerical budget was reached.
 
 **Gradual Evolution verification:** [2], §1.2.3, printed pp30–36, especially pp31–33 and Figs1.16–1.17, describes completing needle optimization, forcing a layer to its next higher local merit minimum, and repeating needle optimization. It also describes testing layers to minimize degradation. The method is explicitly non-monotonic. [3], §12.4, pp22–23, gives the same higher-minimum search prescription. [1], §2.2.3, pp124–126, supports the needle/refinement/deletion/refinement cycle.
 
 ## 6. Constraints, stopping, and interpretation
 
-The browser worker may combine small consecutive LM updates into one displayed checkpoint. Spectrum interpolation animates transitions between computed states; it does not add solver iterations or independently calculated intermediate spectra. The needle panel retains the most recent scan and its own geometry until the next scan. Manual stopping keeps the best snapshot already delivered to the interface.
+The browser worker may combine small consecutive LM updates into one displayed checkpoint. Spectrum interpolation animates transitions between computed states; it does not add solver iterations or independently calculated intermediate spectra. The needle panel retains the most recent scan and its own geometry until the next scan. The worker sends archive checkpoints for batched LM updates, so manual stopping retains the best received computed recipe, including steps that were not individually animated.
 
 The design must respect the layer-count and total optical-thickness bounds. LM enforces thickness nonnegativity and the optical limit; finite insertion is checked against both structural limits. An infeasible starting layer is rejected.
 
 The result reports whether the target MSE was attained on the specified discrete spectral grid, or whether an evolution budget or permitted growth search was exhausted. A limit can prevent additional insertions without preventing useful refinement or growth of the existing layers. An unachieved target is not reported as success.
 
-The spectrum line joins the calculated spectral samples; it is not independent validation between samples. Satisfying the sampled merit is not a guarantee of a continuous-band tolerance, especially near a target jump or a narrow resonance. Changing the spectral sample count changes the discrete objective. Increasing sample density is appropriate for checking a promising result.
+After synthesis, a separate verification spectrum checks the final recipe on at least $\max(2001,4L-3)$ uniform points, together with the original optimization points and samples immediately below, at, and above every target jump. Duplicate wavelengths are removed. At a jump the target is right-continuous. The one-sided probe offset is $\max[(\lambda_{\max}-\lambda_{\min})10^{-9},8\epsilon_{\mathrm{machine}}|\lambda_{\mathrm{jump}}|]$, limited to a quarter of the smaller neighboring band width.
+
+The verification report gives its actual point count, unweighted MSE over this augmented grid, maximum absolute reflectance error, and whether its MSE meets the same threshold. Its MSE is a different discrete average from the optimized one; the maximum error is reported separately and is not a user-specified acceptance limit. A requested-grid pass can therefore coexist with a verification-grid failure. This final check does not restart optimization or replace its objective.
+
+The completed spectrum can display these denser samples. Excel preserves the user-requested optimization grid in **Spectrum**, writes the independent samples and signed/squared/absolute residuals in **Verification**, and includes both sets of diagnostics in **Run settings**. Between-sample curve segments are visual interpolation. Arbitrary nonconstant sample arrays without a piecewise target definition have no implied between-point target, so the programmatic verifier returns no dense check for that case.
+
+Finite spectral sampling is not a proof of a continuous-band tolerance, particularly for discontinuous targets or resonances narrower than the sample spacing. Changing the spectral sample count changes the discrete objective. The verification follows [3], §10 p17, §12.1 p21, §12.3 p22, and the independent-grid examples in §13 pp25–27.
 
 Neither a local thickness minimum nor nonnegative sampled needle derivatives establishes global optimality. Results depend on the starting material and thickness, spectral grid, search budgets, and allowable thickness. An arbitrary step target may be impossible under the stated constraints. Real manufacturing also requires wavelength-dependent optical constants, absorption, tolerances, and process constraints outside this demonstration's model.
 
@@ -220,6 +226,8 @@ with $F\simeq2.25678035\times10^{-4}$. The strongest replacement derivative is a
 For application-order arrays, reverse the layer sequence. The same host is array index 1, and its local air-side coordinate is $145.7781-117.2178=28.5603$nm. The printed dimensions are rounded, so the last digits of the computed derivative differ slightly from the source's higher-precision result.
 
 The books verify the formulas and method. These exact numerical fixture values come from the supplied specification, not from the books. The specification explicitly states that its own numerical examples did not include a Gradual Evolution experiment; the release's growth implementation is checked separately.
+
+The independent calculation audit also compares the matrix implementation with a separately implemented scalar Fresnel recursion and the book’s admittance/adjoint derivatives, including randomized stacks and high-precision resonant-cavity cases. See [numerical verification](VERIFICATION.md) for the recorded checks and precision limits. Passing these checks validates the tested calculations; it does not establish global optimality or certify every possible continuous spectrum.
 
 ## References
 

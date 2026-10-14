@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluate, merit, opticalThickness, geometricThickness, needleDerivative, scanNeedles, insertNeedle, normalizeLayers } from '../src/optics.js';
-import { refine, growthCandidates, synthesize, feasibleNeedle } from '../src/optimizer.js';
+import { refine, growthCandidates, synthesize, feasibleNeedle, solveThicknessSubproblem, verifySpectrum } from '../src/optimizer.js';
 import { PRESETS, targetAt, grid } from '../src/config.js';
 
 const close = (actual, expected, tolerance = 1e-9, label = '') =>
@@ -241,7 +241,159 @@ test('default 450–650 nm mirror demonstration reaches its requested target MSE
   }
   assert.ok(final.done && final.targetReached);
   assert.ok(final.merit <= config.targetMerit);
+  assert.ok(final.verification?.meetsTarget);
   for (const stage of ['refinement', 'needle-scan', 'needle-insertion', 'growth', 'cleanup', 'final']) {
     assert.ok(stages.has(stage), `Missing demonstration stage: ${stage}`);
   }
+});
+
+test('cleanup never sacrifices an exact archived match or reports a contradictory target status', async () => {
+  const target = evaluate([makeLayer('H', 2.3, 0.01)], wavelengths, 1.52).R;
+  let final;
+  for await (const frame of synthesize(problem({ startThickness: 0.01, target,
+    targetMerit: 0, maxCycles: 1, cleanupThickness: 0.5 }))) final = frame;
+  close(final.merit, 0, 0);
+  assert.equal(final.layers.length, 1);
+  assert.equal(final.targetReached, true);
+  assert.match(final.reason, /Target MSE reached/);
+});
+
+// Independent, pivoted dense elimination used only by the exhaustive QP oracle.
+function denseSolve(matrix, rhs) {
+  if (!rhs.length) return [];
+  const rows = matrix.map((row, i) => [...row, rhs[i]]);
+  for (let k = 0; k < rhs.length; k++) {
+    let pivot = k;
+    for (let i = k + 1; i < rhs.length; i++) if (Math.abs(rows[i][k]) > Math.abs(rows[pivot][k])) pivot = i;
+    if (Math.abs(rows[pivot][k]) < 1e-18) return null;
+    [rows[k], rows[pivot]] = [rows[pivot], rows[k]];
+    const divisor = rows[k][k];
+    for (let j = k; j <= rhs.length; j++) rows[k][j] /= divisor;
+    for (let i = 0; i < rhs.length; i++) if (i !== k) {
+      const factor = rows[i][k];
+      for (let j = k; j <= rhs.length; j++) rows[i][j] -= factor * rows[k][j];
+    }
+  }
+  return rows.map(row => row.at(-1));
+}
+
+test('bounded LM subproblem agrees with exhaustive active-set enumeration on 160 deterministic problems', t => {
+  let seed = 8793127;
+  const random = () => { seed = (1664525 * seed + 1013904223) >>> 0; return seed / 2 ** 32; };
+  const dot = (a, b) => a.reduce((s, v, i) => s + v * b[i], 0);
+  let worstRelativeObjectiveError = 0;
+  for (let sample = 0; sample < 160; sample++) {
+    const size = 1 + sample % 5;
+    const A = Array.from({ length: size }, () => Array.from({ length: size }, () => 2 * random() - 1));
+    const H = Array.from({ length: size }, (_, i) => Array.from({ length: size }, (_, j) =>
+      A.reduce((sum, row) => sum + row[i] * row[j], 0) + (i === j ? 0.03 : 0)));
+    const d = Array.from({ length: size }, () => random() < 0.3 ? 0 : 100 * random());
+    const n = Array.from({ length: size }, () => 1.38 + random() * (3.95 - 1.38));
+    const limit = Math.max(1, dot(d, n) * (sample % 2 ? 1 : 1.3));
+    const unconstrained = Array.from({ length: size }, () => 300 * random() - 100);
+    const gradient = H.map(row => dot(row, d.map((v, i) => v - unconstrained[i])));
+    const rhs = H.map((row, i) => dot(row, d) - gradient[i]);
+    const objective = x => {
+      const delta = x.map((v, i) => v - d[i]);
+      return dot(gradient, delta) + 0.5 * dot(delta, H.map(row => dot(row, delta)));
+    };
+    let oracle = Infinity;
+    // Enumerate every face, with and without an active optical-thickness cap.
+    for (let mask = 0; mask < 2 ** size; mask++) for (const cap of [false, true]) {
+      const free = Array.from({ length: size }, (_, i) => i).filter(i => mask & (1 << i));
+      if (cap && !free.length) continue;
+      const matrix = free.map(i => free.map(j => H[i][j]));
+      const b = free.map(i => rhs[i]);
+      if (cap) {
+        matrix.forEach((row, i) => row.push(n[free[i]]));
+        matrix.push([...free.map(i => n[i]), 0]);
+        b.push(limit);
+      }
+      const solution = denseSolve(matrix, b);
+      if (!solution) continue;
+      const x = new Array(size).fill(0);
+      free.forEach((i, k) => { x[i] = solution[k]; });
+      if (x.some(v => v < -1e-8) || dot(n, x) > limit + 1e-8) continue;
+      oracle = Math.min(oracle, objective(x));
+    }
+    const actual = solveThicknessSubproblem(H, gradient, d, n, limit);
+    assert.ok(actual, `sample ${sample}: solve failed`);
+    assert.ok(actual.every(v => v >= -1e-10), `sample ${sample}: negative thickness`);
+    assert.ok(dot(n, actual) <= limit + 1e-7, `sample ${sample}: optical cap`);
+    const relativeError = Math.abs(objective(actual) - oracle) / Math.max(1, Math.abs(oracle));
+    worstRelativeObjectiveError = Math.max(worstRelativeObjectiveError, relativeError);
+    assert.ok(relativeError < 1e-9, `sample ${sample}: relative objective error ${relativeError}`);
+  }
+  t.diagnostic(`Maximum relative quadratic-objective error: ${worstRelativeObjectiveError}`);
+});
+
+test('high-Q cavity reflectance agrees with 85-digit reference for exact binary input values', () => {
+  // Independently evaluated with Python Decimal at 85-digit precision, including
+  // sin/cos Taylor series and exact Decimal.from_float(n,d,lambda) conversion.
+  // These detuned values are NOT the ideal-real-arithmetic quarter-wave result.
+  const references = [
+    [15, 0.04270021012934305, -76318562917.30447013, -9152971420.43463738],
+    [19, 0.9996245667688254, -238280129170.12495484, 145270601628.71681173],
+  ];
+  for (const [pairs, reference, referenceJ, referenceNeedle] of references) {
+    const layers = [];
+    for (let i = 0; i < pairs; i++) layers.push(makeLayer('H', 3.95, 550 / (4 * 3.95)), makeLayer('L', 1.38, 550 / (4 * 1.38)));
+    layers.push(makeLayer('H', 3.95, 550 / (2 * 3.95)));
+    for (let i = 0; i < pairs; i++) layers.push(makeLayer('L', 1.38, 550 / (4 * 1.38)), makeLayer('H', 3.95, 550 / (4 * 3.95)));
+    const state = evaluate(layers, [550], 1.52);
+    close(state.R[0], reference, 2e-13, `${layers.length}-layer resonator`);
+    close(state.R[0] + state.T[0], 1, 1e-12);
+    assert.ok(state.jacobian[0].every(Number.isFinite));
+    const center = 2 * pairs;
+    close(state.jacobian[0][center], referenceJ, Math.abs(referenceJ) * 1e-11);
+    close(needleDerivative(layers, [550], [0.2], 1.52, center, layers[center].d * 0.271, 1.38),
+      referenceNeedle, Math.abs(referenceNeedle) * 1e-11);
+  }
+});
+
+test('independent verification detects a real sparse-grid aliasing failure', async () => {
+  // 84,000/lambda is integer at 400,500,600,700,800 nm: this thick film is
+  // half-wave at every chosen point but strongly reflecting between them.
+  const wave = grid(400, 800, 5);
+  const bareReflection = ((1 - 1.52) / (1 + 1.52)) ** 2;
+  let final;
+  for await (const frame of synthesize(problem({ nH: 3.95, wavelengths: wave,
+    target: wave.map(() => bareReflection), startThickness: 42000 / 3.95,
+    maxOpticalThickness: 50000, maxCycles: 1, targetMerit: 1e-10 }))) final = frame;
+  assert.equal(final.targetReached, true);
+  assert.ok(final.merit < 1e-20);
+  assert.ok(final.verification.points >= 2001);
+  assert.equal(final.verification.meetsTarget, false);
+  assert.ok(final.verification.merit > 0.1);
+  assert.ok(final.verification.maxAbsError > 0.6);
+});
+
+test('dense verification includes original samples and both one-sided limits of every target jump', () => {
+  const wave = grid(400, 800, 17);
+  const bands = [{ end: 0.375, R: 0.1 }, { end: 0.75, R: 0.95 }, { end: 1, R: 0.2 }];
+  const config = problem({ wavelengths: wave, bands,
+    target: wave.map(w => targetAt(w, 400, 800, bands)) });
+  const result = verifySpectrum([makeLayer('H', 2.3, 100)], config);
+  assert.equal(result.boundaryProbes.length, 2);
+  assert.ok(wave.every(w => result.wavelengths.includes(w)));
+  assert.ok(result.wavelengths.every((w, i) => i === 0 || w > result.wavelengths[i - 1]));
+  for (const [i, probe] of result.boundaryProbes.entries()) {
+    assert.ok(probe.left < probe.wavelength && probe.wavelength < probe.right);
+    for (const w of Object.values(probe)) assert.ok(result.wavelengths.includes(w));
+    close(result.target[result.wavelengths.indexOf(probe.left)], bands[i].R, 0);
+    close(result.target[result.wavelengths.indexOf(probe.wavelength)], bands[i + 1].R, 0);
+    close(result.target[result.wavelengths.indexOf(probe.right)], bands[i + 1].R, 0);
+  }
+  close(result.merit, merit(result.R, result.target), 0);
+  close(result.maxAbsError, Math.max(...result.R.map((R, i) => Math.abs(R - result.target[i]))), 0);
+  const arbitrarySamples = problem({ target: wavelengths.map((_, i) => i / wavelengths.length) });
+  assert.equal(verifySpectrum([], arbitrarySamples), null);
+  assert.throws(() => verifySpectrum([], { ...config, target: wave.map(() => 0) }), /do not match/);
+});
+
+test('algebraic normalization does not silently remove positive thin layers', () => {
+  const layers = [makeLayer('H', 3.95, 1e-12), makeLayer('L', 1.38, 50)];
+  assert.deepEqual(normalizeLayers(layers), layers);
+  const zeros = [makeLayer('L', 1.38, 10, 'a'), makeLayer('H', 3.95, 0), makeLayer('L', 1.38, 20, 'b')];
+  assert.deepEqual(normalizeLayers(zeros), [makeLayer('L', 1.38, 30, 'a')]);
 });

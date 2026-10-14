@@ -33,16 +33,20 @@ jobs:
         run: npm run build
       - name: Package application
         run: |
+          VERSION=$(node -p "require('./package.json').version")
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           cp README.md dist/README.md
           cp -r docs dist/docs
           cd dist
-          zip -r ../ms-astra-v1.0.0.zip .
-      - name: Publish first release if absent
+          zip -r "../ms-astra-v$VERSION.zip" .
+      - name: Publish verified release if absent
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v1.0.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release v1.0.0 already exists; verification completed."
+          VERSION=$(node -p "require('./package.json').version")
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists; verification completed."
           else
-            gh release create v1.0.0 ms-astra-v1.0.0.zip --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "MS Astra 1.0 — Gradual Evolution Studio" --notes-file docs/RELEASE-v1.0.0.md
+            gh release create "v$VERSION" "ms-astra-v$VERSION.zip" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "MS Astra $VERSION — Optical Coating Studio" --notes-file "docs/RELEASE-v$VERSION.md"
           fi

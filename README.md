@@ -6,7 +6,7 @@ No ChatGPT or GitHub account is required. The application runs directly in your 
 
 A visual laboratory for **Gradual Evolution synthesis of multilayer optical coatings**. Draw a piecewise-constant reflectance target and watch a single layer evolve through thickness refinement, analytic needle insertion, deliberate thickness growth, cleanup, and final optimization.
 
-The English interface is designed for live demonstrations: large animated spectrum, needle-sensitivity and coating views, a merit history, presentation mode, and Excel export. Calculations run in your browser; no account, backend, external service, or runtime dependency is required.
+The English interface is designed for live demonstrations. The dominant reflectance spectrum, needle sensitivity, living stack and merit history share one desktop dashboard. Larger type, a bold target, deliberate insertion timing and a physically scaled magnified insertion view keep the process readable. Design settings and detailed logs open in separate dialogs. Calculations run in your browser; no account, backend, external service, or runtime dependency is required.
 
 ## Run locally
 
@@ -35,7 +35,7 @@ Use HTTP rather than opening `index.html` directly; the application uses JavaScr
 
 The initial demonstration is a 95% reflector over **450–650 nm**, starting from 100 nm of Ta2O5 on BK7. With the supplied limits it reaches the `10⁻⁴` MSE threshold. Broader or sharper targets can need more layers, optical thickness or evolution cycles.
 
-1. Choose the low- and high-index materials, starting material, and starting geometric thickness.
+1. Open **Design settings** to choose the low- and high-index materials, starting material, and starting geometric thickness.
 2. Set the wavelength interval and spectral sample count. Choose **Mirror**, **Edge filter**, **Anti-reflection**, or **Band reflector** as a starting target.
 3. Drag a target level vertically to change reflectance. Drag a boundary horizontally to move it in wavelength, including the two interval-end handles. **Edit target** provides numerical band editing.
 4. Set the maximum layer count, maximum **total optical thickness** `Σ nᵢdᵢ`, and **Target merit**. The merit is the mean squared difference between computed and target fractional reflectance.
@@ -47,6 +47,13 @@ Negative needle sensitivity identifies a promising replacement of host material.
 The `.xlsx` workbook includes the target and computed spectrum, residuals, layer materials and refractive indices, geometric and optical thicknesses, run settings, and recorded evolution checkpoints. Layer 1 faces air in both the application and export.
 
 The needle chart retains the **last scanned structure** while refinement changes the current stack. Intermediate LM frames are batched for presentation; the numerical solver still evaluates every accepted step.
+
+## Version 1.1 verification and presentation
+
+- **Live** holds a needle insertion for 1.9 seconds; **Cinematic** holds it for 3.2 seconds. The local detail enlarges the insertion neighborhood while preserving relative thicknesses. Pause freezes the numerical stage and visual motion; Fast removes presentation holds.
+- At completion, an independent denser wavelength grid includes the requested points and both sides of every target jump. The final displayed spectrum uses this grid. The main merit remains the objective on the requested optimization points; the status reports the separate dense check.
+- Excel preserves the original **Spectrum** sheet and adds **Verification**, including the denser spectrum, residuals and boundary probes. This is a finite sampling check, not a proof of a continuous-band tolerance.
+- The numerical audit checks Fresnel reflectance, energy conservation, analytic sensitivities, constrained LM, growth, cleanup and the retained best design. Compensated phase evaluation improves narrow-resonance accuracy. See [verification evidence](docs/VERIFICATION.md) and [release notes](docs/RELEASE-v1.1.0.md).
 
 ## Physical model
 

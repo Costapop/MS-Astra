@@ -237,6 +237,69 @@ test('rejects mismatched spectra, non-finite data, and invalid optical parameter
   assert.throws(() => createWorkbook({ ...sample, layers: [{ n: 1.46 }] }), /finite number/);
 });
 
+test('exports independent verification without replacing the requested-grid spectrum', () => {
+  const wavelengths = [400, 549.9999998, 550, 550.0000002, 700];
+  const target = [0.1, 0.1, 0.9, 0.9, 0.1];
+  const R = [0.12, 0.49, 0.5, 0.51, 0.14];
+  const residuals = R.map((value, index) => value - target[index]);
+  const merit = residuals.reduce((sum, value) => sum + value ** 2, 0) / R.length;
+  const verification = { points: 5, wavelengths, target, R, merit, maxAbsError: 0.4,
+    meetsTarget: false, targetModel: 'piecewise-constant',
+    boundaryProbes: [{ wavelength: 550, left: wavelengths[1], right: wavelengths[3] }] };
+  const files = openZip(createWorkbook({ ...sample, config: { ...sample.config, targetMerit: 0.002 }, verification }));
+  assert.equal(files.size, 12);
+  assert.match(files.get('xl/workbook.xml'), /name="Verification" sheetId="5"/);
+  assert.match(files.get('xl/_rels/workbook.xml.rels'), /Target="worksheets\/sheet5.xml"/);
+  const spectrum = files.get('xl/worksheets/sheet1.xml');
+  assert.match(spectrum, /dimension ref="A1:D7"/);
+  assert.equal(cellNumber(spectrum, 'B6'), sample.target[1]);
+  assert.equal(cellNumber(spectrum, 'C6'), sample.R[1]);
+  const dense = files.get('xl/worksheets/sheet5.xml');
+  assert.match(dense, /dimension ref="A1:G9"/);
+  for (let index = 0; index < 5; index++) {
+    const r = index + 5;
+    assert.equal(cellNumber(dense, `A${r}`), wavelengths[index]);
+    assert.equal(cellNumber(dense, `B${r}`), target[index]);
+    assert.equal(cellNumber(dense, `C${r}`), R[index]);
+    assert.equal(cellNumber(dense, `D${r}`), residuals[index]);
+    assert.equal(cellNumber(dense, `E${r}`), residuals[index] ** 2);
+    assert.equal(cellNumber(dense, `F${r}`), Math.abs(residuals[index]));
+    assert.match(cell(dense, `E${r}`), new RegExp(`<f>D${r}\\^2<\\/f>`));
+    assert.match(cell(dense, `F${r}`), new RegExp(`<f>ABS\\(D${r}\\)<\\/f>`));
+  }
+  assert.match(dense, /<c r="A6" s="6">/); // Do not round neighboring probe wavelengths to the same display value.
+  assert.match(cell(dense, 'G6'), /Just below target jump/);
+  assert.match(cell(dense, 'G7'), /At target jump \(right side\)/);
+  assert.match(cell(dense, 'G8'), /Just above target jump/);
+  const settings = files.get('xl/worksheets/sheet3.xml');
+  const setting = label => settings.match(/<row\b[^>]*>[\s\S]*?<\/row>/g).find(content => content.includes(`>${label}</t>`));
+  const numericSetting = label => {
+    const content = setting(label);
+    return cellNumber(content, content.match(/<c r="(B\d+)"/)[1]);
+  };
+  assert.equal(numericSetting('Verification spectral sample count'), 5);
+  assert.equal(numericSetting('Verification-grid mean squared reflectance residual'), merit);
+  assert.equal(numericSetting('Verification-grid maximum absolute reflectance residual'), 0.4);
+  assert.match(setting('Verification-grid target merit reached'), />No</);
+  assert.match(settings, /Finite sampling does not prove a continuous-band tolerance/);
+});
+
+test('rejects inconsistent verification diagnostics instead of exporting a misleading pass', () => {
+  const verification = { points: 3, wavelengths: sample.wavelengths, target: sample.target, R: sample.R,
+    merit: 0.0015, maxAbsError: 0.05, meetsTarget: true };
+  const input = { ...sample, config: { ...sample.config, targetMerit: 0.002 }, verification };
+  assert.doesNotThrow(() => createWorkbook(input));
+  for (const [patch, pattern] of [
+    [{ R: [0.2] }, /same nonzero length/],
+    [{ wavelengths: [400, 400, 700] }, /strictly increasing/],
+    [{ points: 4 }, /point count/],
+    [{ target: [0.1, 1.2, 0.1] }, /within/],
+    [{ merit: 0.02 }, /merit disagrees/],
+    [{ maxAbsError: 0.01 }, /maxAbsError disagrees/],
+    [{ meetsTarget: false }, /threshold status/],
+  ]) assert.throws(() => createWorkbook({ ...input, verification: { ...verification, ...patch } }), pattern);
+});
+
 test('browser download uses the correct filename, MIME type, and URL lifecycle', () => {
   const originalDocument = globalThis.document;
   const originalCreate = URL.createObjectURL;

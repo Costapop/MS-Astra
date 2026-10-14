@@ -1,4 +1,5 @@
 import { evaluate, merit, opticalThickness, scanNeedles, insertNeedle, normalizeLayers } from './optics.js';
+import { targetAt } from './config.js';
 
 const clone = layers => layers.map(layer => ({ ...layer }));
 const dot = (a, b) => a.reduce((sum, value, i) => sum + value * b[i], 0);
@@ -37,7 +38,7 @@ function solveSPD(matrix, rhs) {
  * Bounds d>=0 and sum(n*d)<=Dmax are part of the subproblem, not post-hoc
  * clipping of an unconstrained LM result. H is positive definite after damping.
  */
-function constrainedStep(H, gradient, thickness, indices, maximum) {
+export function solveThicknessSubproblem(H, gradient, thickness, indices, maximum) {
   const n = thickness.length;
   const x = thickness.slice();
   const active = new Set(x.flatMap((value, i) => value <= 1e-11 ? [i] : []));
@@ -113,7 +114,65 @@ function problemConfig(input) {
   if (!(config.targetMerit >= 0) || !Number.isFinite(config.targetMerit)) throw new Error('Target MSE must be nonnegative.');
   if (!(config.cleanupThickness >= 0) || !Number.isFinite(config.cleanupThickness)) throw new Error('Cleanup thickness must be nonnegative.');
   if (!Number.isInteger(config.maxCycles) || config.maxCycles < 1) throw new Error('Evolution cycle limit must be a positive integer.');
+  for (const key of ['maxRefinementIterations', 'maxNeedleCandidates', 'maxNeedlesPerCycle']) {
+    if (!Number.isInteger(config[key]) || config[key] < 1) throw new Error(`${key} must be a positive integer.`);
+  }
+  if (config.maxGrowthOptical !== undefined && (!Number.isFinite(config.maxGrowthOptical) || config.maxGrowthOptical <= 0))
+    throw new Error('The optical growth-search limit must be positive.');
+  if (config.bands !== undefined) {
+    if (!Array.isArray(config.bands) || !config.bands.length) throw new Error('Target bands must be a nonempty array.');
+    let previous = 0;
+    for (const band of config.bands) {
+      if (!Number.isFinite(band.end) || band.end <= previous || band.end > 1 || !Number.isFinite(band.R) || band.R < 0 || band.R > 1)
+        throw new Error('Target bands must have increasing boundaries and fractional reflectance between 0 and 1.');
+      previous = band.end;
+    }
+    if (previous !== 1) throw new Error('Target bands must cover the complete wavelength range.');
+    const minimum = config.wavelengths[0];
+    const maximum = config.wavelengths.at(-1);
+    if (maximum <= minimum) throw new Error('Piecewise target verification requires a nonzero wavelength range.');
+    if (config.target.some((value, i) => Math.abs(value - targetAt(config.wavelengths[i], minimum, maximum, config.bands)) > 1e-12))
+      throw new Error('Target samples do not match the supplied piecewise-constant bands.');
+  }
   return config;
+}
+
+/**
+ * Independent denser spectral check, including both sides of each discontinuity.
+ * This is a discrete verification, not a certified continuous-band error bound.
+ * Arbitrary target samples do not define between-point values: without bands,
+ * only a constant target can be verified without inventing an interpolation.
+ */
+export function verifySpectrum(layers, input) {
+  const config = problemConfig(input);
+  const minimum = config.wavelengths[0];
+  const maximum = config.wavelengths.at(-1);
+  if (!(maximum > minimum)) return null;
+  const bands = config.bands ?? (config.target.every(value => value === config.target[0])
+    ? [{ end: 1, R: config.target[0] }] : null);
+  if (!bands) return null;
+  const count = Math.max(2001, 4 * config.wavelengths.length - 3);
+  const span = maximum - minimum;
+  const samples = [...config.wavelengths,
+    ...Array.from({ length: count }, (_, i) => minimum + span * i / (count - 1))];
+  const boundaryProbes = [];
+  for (let i = 0; i < bands.length - 1; i++) {
+    if (bands[i].R === bands[i + 1].R) continue;
+    const wavelength = minimum + span * bands[i].end;
+    const adjacentGap = Math.min(bands[i].end - (bands[i - 1]?.end ?? 0), bands[i + 1].end - bands[i].end) * span;
+    const epsilon = Math.min(adjacentGap / 4, Math.max(span * 1e-9, Number.EPSILON * Math.max(1, Math.abs(wavelength)) * 8));
+    const left = wavelength - epsilon;
+    const right = wavelength + epsilon;
+    samples.push(left, wavelength, right);
+    boundaryProbes.push({ wavelength, left, right });
+  }
+  const wavelengths = [...new Set(samples)].sort((a, b) => a - b);
+  const target = wavelengths.map(wavelength => targetAt(wavelength, minimum, maximum, bands));
+  const R = evaluate(layers, wavelengths, config.ns, { jacobian: false }).R;
+  const value = merit(R, target);
+  const maxAbsError = R.reduce((max, reflection, i) => Math.max(max, Math.abs(reflection - target[i])), 0);
+  return { points: wavelengths.length, wavelengths, target, R, merit: value, maxAbsError,
+    meetsTarget: value <= config.targetMerit, targetModel: 'piecewise-constant', boundaryProbes };
 }
 
 function* refinementSteps(initial, config, maximumIterations = config.maxRefinementIterations) {
@@ -139,7 +198,7 @@ function* refinementSteps(initial, config, maximumIterations = config.maxRefinem
       H[i][i] += damping * Math.max(H[i][i], 1e-10) + 1e-16;
     }
     const thickness = layers.map(layer => layer.d);
-    const next = constrainedStep(H, gradient, thickness, layers.map(layer => layer.n), config.maxOpticalThickness);
+    const next = solveThicknessSubproblem(H, gradient, thickness, layers.map(layer => layer.n), config.maxOpticalThickness);
     if (!next) { damping = Math.min(1e12, damping * 10); continue; }
     const delta = next.map((value, i) => value - thickness[i]);
     if (Math.sqrt(dot(delta, delta)) < 1e-7) { stationary = true; break; }
@@ -283,6 +342,18 @@ export async function* synthesize(input) {
   const updateBest = () => {
     if (value < best.merit) best = { layers: clone(layers), R: R.slice(), merit: value };
   };
+  const normalizeSearchState = () => {
+    const normalized = normalizeLayers(layers);
+    // Keep a zero starting variable available for the next growth exploration.
+    if (!normalized.length) return;
+    const changed = normalized.length !== layers.length || normalized.some((layer, i) =>
+      layer.d !== layers[i]?.d || layer.n !== layers[i]?.n);
+    layers = normalized;
+    if (changed) {
+      R = evaluate(layers, config.wavelengths, config.ns, { jacobian: false }).R;
+      value = merit(R, config.target);
+    }
+  };
   const frame = (stage, message, extra = {}) => ({
     stage, message, layers: clone(layers), R: R.slice(), merit: value,
     bestMerit: best.merit, iteration, cycle, opticalThickness: opticalThickness(layers), ...extra,
@@ -301,8 +372,7 @@ export async function* synthesize(input) {
     }
     ({ layers, R } = item.value); value = item.value.merit;
     iteration = iterationStart + item.value.iterations;
-    const normalized = normalizeLayers(layers);
-    if (normalized.length) layers = normalized;
+    normalizeSearchState();
     updateBest();
     if (value <= config.targetMerit) { reason = 'Target MSE reached on the specified spectral grid.'; break; }
     for (let needleStep = 0; needleStep < config.maxNeedlesPerCycle; needleStep++) {
@@ -327,8 +397,7 @@ export async function* synthesize(input) {
       }
       ({ layers, R } = item.value); value = item.value.merit;
       iteration = needleIterationStart + item.value.iterations;
-      const normalizedNeedle = normalizeLayers(layers);
-      if (normalizedNeedle.length) layers = normalizedNeedle;
+      normalizeSearchState();
       updateBest();
       if (value <= config.targetMerit) { reason = 'Target MSE reached on the specified spectral grid.'; break outer; }
       await new Promise(resolve => setTimeout(resolve, 0));
@@ -360,7 +429,9 @@ export async function* synthesize(input) {
   if (cleanupTrial.length !== layers.length) {
     const cleaned = refine(cleanupTrial, config, { maxIterations: 100 });
     iteration += cleaned.iterations;
-    if (cleaned.merit <= value + EPS_MERIT) {
+    // A numerical tolerance must not authorize dropping the best design or
+    // crossing a user-requested threshold, especially when its MSE is zero.
+    if (cleaned.merit <= value) {
       ({ layers, R } = cleaned); value = cleaned.merit;
       cleanupAccepted = true;
       updateBest();
@@ -385,8 +456,17 @@ export async function* synthesize(input) {
   R = evaluate(layers, config.wavelengths, config.ns, { jacobian: false }).R;
   value = merit(R, config.target);
   updateBest();
+  // Even algebraically equivalent normalization can change the last floating-
+  // point bits. Return the actual best evaluated design, including for an exact
+  // zero-MSE target; do not silently replace it with a marginally worse recipe.
+  if (value > best.merit) {
+    layers = clone(best.layers);
+    R = best.R.slice();
+    value = best.merit;
+  }
   if (value <= config.targetMerit) reason = 'Target MSE reached on the specified spectral grid.';
   yield frame('done', reason, { done: true, reason, targetReached: value <= config.targetMerit,
+    verification: verifySpectrum(layers, config),
     limits: { layers: config.maxLayers, opticalThickness: config.maxOpticalThickness },
     search: { maxCycles: config.maxCycles, maxGrowthOptical: config.maxGrowthOptical ?? 2 * Math.max(...config.wavelengths), maxNeedleCandidates: config.maxNeedleCandidates },
   });

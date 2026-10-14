@@ -6,6 +6,38 @@
  */
 const TAU = 2 * Math.PI;
 const IDENTITY = [1, 0, 0, 1];
+const SPLITTER = 134217729; // 2^27 + 1: Dekker split for IEEE-754 doubles.
+
+function productWithError(a, b) {
+  const product = a * b;
+  const splitA = SPLITTER * a;
+  const highA = splitA - (splitA - a);
+  const lowA = a - highA;
+  const splitB = SPLITTER * b;
+  const highB = splitB - (splitB - b);
+  const lowB = b - highB;
+  return [product, ((highA * highB - product) + highA * lowB + lowA * highB) + lowA * lowB];
+}
+
+function phaseSinCos(n, d, wavelength) {
+  // Preserve the low bits of n*d/lambda, then reduce by an exact quarter turn.
+  // Evaluating cos(PI/2) directly leaves a ~6e-17 residual which is strongly
+  // amplified by high-Q cavities. The reduced angle avoids that spurious phase.
+  const [optical, opticalError] = productWithError(n, d);
+  const turns = optical / wavelength;
+  const [recovered, recoveredError] = productWithError(turns, wavelength);
+  const turnsError = ((optical - recovered) + opticalError - recoveredError) / wavelength;
+  const quadrant = Math.round(turns * 4);
+  const phase = TAU * ((turns - quadrant / 4) + turnsError);
+  const sine = Math.sin(phase);
+  const cosine = Math.cos(phase);
+  switch ((quadrant % 4 + 4) % 4) {
+    case 0: return [sine, cosine];
+    case 1: return [cosine, -sine];
+    case 2: return [-sine, -cosine];
+    default: return [-cosine, sine];
+  }
+}
 
 export function multiply(A, B) {
   return [
@@ -17,9 +49,8 @@ export function multiply(A, B) {
 }
 
 export function layerMatrix(n, d, wavelength) {
-  const phase = TAU * n * d / wavelength;
-  const sine = Math.sin(phase);
-  return [Math.cos(phase), sine / n, n * sine, Math.cos(phase)];
+  const [sine, cosine] = phaseSinCos(n, d, wavelength);
+  return [cosine, sine / n, n * sine, cosine];
 }
 
 function generator(n, wavelength) {
@@ -166,14 +197,14 @@ export function insertNeedle(layers, candidate, width, id = 'needle') {
   if (!(width > 0 && width <= host.d)) throw new Error('Needle width must fit inside the host layer.');
   const start = Math.max(0, Math.min(host.d - width, candidate.position - width / 2));
   const replacement = [];
-  if (start > 1e-12) replacement.push({ ...host, d: start });
+  if (start > 0) replacement.push({ ...host, d: start });
   replacement.push({ id, material: candidate.material, n: candidate.n, d: width });
-  if (host.d - start - width > 1e-12) replacement.push({ ...host, id: `${host.id}-split-${id}`, d: host.d - start - width });
+  if (host.d - start - width > 0) replacement.push({ ...host, id: `${host.id}-split-${id}`, d: host.d - start - width });
   return [...layers.slice(0, candidate.layerIndex), ...replacement, ...layers.slice(candidate.layerIndex + 1)].map(layer => ({ ...layer }));
 }
 
 /** Exact algebraic normalization: remove zero layers and merge equal neighbors. */
-export function normalizeLayers(layers, zeroTolerance = 1e-10) {
+export function normalizeLayers(layers, zeroTolerance = 0) {
   const result = [];
   for (const layer of layers) {
     if (layer.d <= zeroTolerance) continue;

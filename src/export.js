@@ -175,6 +175,48 @@ function settingCells(entries) {
   });
 }
 
+function normalizeVerification(verification, config) {
+  if (verification == null) return null;
+  const wavelengths = vector(verification.wavelengths, 'Verification wavelengths');
+  const target = vector(verification.target, 'Verification target');
+  const R = vector(verification.R, 'Verification R');
+  if (!wavelengths.length || wavelengths.length !== target.length || wavelengths.length !== R.length) {
+    throw new RangeError('Verification wavelength, target, and reflectance arrays must have the same nonzero length.');
+  }
+  if (wavelengths.some((value, index) => value <= 0 || (index && value <= wavelengths[index - 1]))) {
+    throw new RangeError('Verification wavelengths must be positive and strictly increasing.');
+  }
+  if (target.some(value => value < 0 || value > 1)) throw new RangeError('Verification target R must lie within [0, 1].');
+  if (verification.points != null && verification.points !== wavelengths.length) {
+    throw new RangeError('Verification point count disagrees with its spectrum.');
+  }
+  const residuals = R.map((value, index) => value - target[index]);
+  const merit = residuals.reduce((sum, value) => sum + value * value, 0) / residuals.length;
+  const maxAbsError = residuals.reduce((maximum, value) => Math.max(maximum, Math.abs(value)), 0);
+  for (const [key, actual] of Object.entries({ merit, maxAbsError })) {
+    if (verification[key] != null) {
+      const reported = finite(verification[key], `Verification ${key}`);
+      if (Math.abs(reported - actual) > 1e-12 * Math.max(1, Math.abs(actual))) {
+        throw new RangeError(`Verification ${key} disagrees with its spectrum.`);
+      }
+    }
+  }
+  const threshold = config.targetMerit;
+  const meetsTarget = typeof threshold === 'number' && Number.isFinite(threshold)
+    ? merit <= threshold : verification.meetsTarget;
+  if (typeof verification.meetsTarget === 'boolean' && typeof meetsTarget === 'boolean' && verification.meetsTarget !== meetsTarget) {
+    throw new RangeError('Verification threshold status disagrees with its spectrum and target merit.');
+  }
+  const probeLabels = new Map();
+  for (const probe of verification.boundaryProbes ?? []) {
+    for (const [key, label] of [['left', 'Just below target jump'], ['wavelength', 'At target jump (right side)'], ['right', 'Just above target jump']]) {
+      probeLabels.set(finite(probe[key], `Verification boundary ${key}`), label);
+    }
+  }
+  return { wavelengths, target, R, residuals, merit, maxAbsError, meetsTarget,
+    points: wavelengths.length, targetModel: verification.targetModel ?? 'Specified target', probeLabels };
+}
+
 const CRC_TABLE = Uint32Array.from({ length: 256 }, (_, byte) => {
   let crc = byte;
   for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xEDB88320 : 0);
@@ -243,7 +285,7 @@ function zip(files) {
 }
 
 /** Return an OOXML workbook as bytes, suitable for Blob or filesystem use. */
-export function createWorkbook({ config = {}, layers = [], wavelengths = [], target = [], R = [], history = [], status = 'Exported' } = {}) {
+export function createWorkbook({ config = {}, layers = [], wavelengths = [], target = [], R = [], history = [], verification = null, status = 'Exported' } = {}) {
   const wl = vector(wavelengths, 'wavelengths');
   const targets = vector(target, 'target');
   const achieved = vector(R, 'R');
@@ -256,6 +298,7 @@ export function createWorkbook({ config = {}, layers = [], wavelengths = [], tar
   const mse = residuals.length ? residuals.reduce((sum, value) => sum + value * value, 0) / residuals.length : 0;
   const geometricTotal = coating.reduce((sum, layer) => sum + layer.d, 0);
   const opticalTotal = coating.reduce((sum, layer) => sum + layer.n * layer.d, 0);
+  const checked = normalizeVerification(verification, config);
   const finalStatus = status && typeof status === 'object' ? status.reason ?? status.message ?? status.status ?? JSON.stringify(status) : status;
   const sheets = [
     ['Spectrum', sheet({
@@ -297,6 +340,15 @@ export function createWorkbook({ config = {}, layers = [], wavelengths = [], tar
         ['Substrate model', 'Semi-infinite; no rear-surface reflection.'],
         ['Layer ordering', 'Incident air → layer 1 → … → final layer → substrate'],
         ['Thickness units', 'Nanometers (nm); optical thickness is Σ(n × d).'],
+        ...(checked ? [
+          ['Verification spectral sample count', checked.points],
+          ['Verification-grid mean squared reflectance residual', checked.merit],
+          ['Verification-grid RMS reflectance residual', Math.sqrt(checked.merit)],
+          ['Verification-grid maximum absolute reflectance residual', checked.maxAbsError],
+          ['Verification-grid target merit reached', typeof checked.meetsTarget === 'boolean' ? checked.meetsTarget : 'Not specified'],
+          ['Verification target model', checked.targetModel],
+          ['Verification scope', 'Independent dense grid plus one-sided target-jump probes. Finite sampling does not prove a continuous-band tolerance.'],
+        ] : []),
         ...configEntries(config),
       ]),
     })],
@@ -341,6 +393,23 @@ export function createWorkbook({ config = {}, layers = [], wavelengths = [], tar
         const merit = item.merit ?? item.error ?? item.cost;
         const optionalNumber = (ref, value, style) => value != null && Number.isFinite(Number(value)) ? numberCell(ref, Number(value), style) : textCell(ref, '');
         return [numberCell(`A${r}`, item.iteration ?? item.step ?? index, 6), textCell(`B${r}`, item.stage ?? item.phase ?? item.label ?? ''), optionalNumber(`C${r}`, merit, 10), optionalNumber(`D${r}`, count, 6), optionalNumber(`E${r}`, optical, 4)];
+      }),
+    })]);
+  }
+  if (checked) {
+    sheets.push(['Verification', sheet({
+      title: 'MS Astra · Independent spectral verification',
+      subtitle: 'Dense check of the final recipe; Spectrum retains the requested optimization grid. R and residuals are fractions, not percent.',
+      headers: ['Wavelength (nm)', 'Target R', 'Achieved R', 'Residual (R − target)', 'Squared residual', 'Absolute residual', 'Sample type'],
+      widths: [25, 20, 20, 27, 25, 25, 34],
+      data: checked.wavelengths.map((wavelength, index) => {
+        const r = index + 5;
+        const residual = checked.residuals[index];
+        // General number format preserves the separation of one-sided probes.
+        return [numberCell(`A${r}`, wavelength, 6), numberCell(`B${r}`, checked.target[index], 5),
+          numberCell(`C${r}`, checked.R[index], 5), numberCell(`D${r}`, residual, 10, `C${r}-B${r}`),
+          numberCell(`E${r}`, residual * residual, 10, `D${r}^2`), numberCell(`F${r}`, Math.abs(residual), 10, `ABS(D${r})`),
+          textCell(`G${r}`, checked.probeLabels.get(wavelength) ?? 'Dense grid')];
       }),
     })]);
   }
