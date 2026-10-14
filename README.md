@@ -2,84 +2,74 @@
 
 **[Open MS Astra in your browser →](https://costapop.github.io/MS-Astra/)**
 
-No ChatGPT or GitHub account is required. The application runs directly in your browser, including synthesis and Excel export.
+MS Astra synthesizes a two‑material multilayer optical coating for a required
+energy reflectance `R(λ)` on a chosen spectral range and shows the whole
+process live: thickness refinement, needle insertion, deliberate thickness
+growth (gradual evolution), thin‑layer cleanup and final optimization. It is
+built for demonstrations — the charts are large, animated and arranged as a
+single engineering dashboard — and it runs entirely in the browser with no
+dependencies, accounts or backend.
 
-A visual laboratory for **Gradual Evolution synthesis of multilayer optical coatings**. Draw a piecewise-constant reflectance target and watch a single layer evolve through thickness refinement, analytic needle insertion, deliberate thickness growth, cleanup, and final optimization.
+## Method in one paragraph
 
-The English interface is designed for live demonstrations. The dominant reflectance spectrum, needle sensitivity, living stack and merit history share one desktop dashboard. Larger type, a bold target, deliberate insertion timing and a physically scaled magnified insertion view keep the process readable. Design settings and detailed logs open in separate dialogs. Calculations run in your browser; no account, backend, external service, or runtime dependency is required.
+Normal incidence from air onto isotropic, homogeneous, lossless,
+non‑dispersive layers on a semi‑infinite substrate. The synthesis starts from a
+single layer, refines all thicknesses with a constrained Levenberg–Marquardt
+method using the analytic Jacobian, computes the needle derivative `g(z)`
+analytically from the adjoint function, inserts a needle of the opposite
+material where `g(z)` is most negative, refines again, and — when no needle
+helps — grows one layer to the nearest merit minimum to open a new basin
+(gradual evolution). Thin layers are removed with their optical thickness
+preserved, and a final refinement closes the run. The formulas follow Furman &
+Tikhonravov, *Basics of Optics of Multilayer Systems* (§1.2, §1.4, §2.2), the
+method specification supplied with the task, and Tikhonravov, *Optical
+Coatings* (SPIE, 2024). Details: [docs/METHOD.md](docs/METHOD.md);
+evidence: [docs/VERIFICATION.md](docs/VERIFICATION.md).
+
+## Using the dashboard
+
+1. Pick a **target preset** or draw your own target on the reflectance chart:
+   drag a level up or down, drag a boundary (or a range end) left or right,
+   double‑click a band to split it, double‑click a boundary to merge. The same
+   values are editable numerically in the sidebar.
+2. Set the spectral range, the number of spectral points, the H and L
+   materials, the substrate, the starting layer (material and geometric
+   thickness) and the limits: maximum number of layers, maximum total optical
+   thickness and the target merit `F = ⟨(R − R̃)²⟩`.
+3. Press **Start synthesis**. The pace control (Cinematic / Live / Fast /
+   Instant) sets how long each stage is held on screen; **Step** advances to
+   the next event, Space pauses and resumes.
+4. Read the result in the tiles and the event log, open the **Layer table**,
+   and **Export Excel** to download the target and synthesized spectra and the
+   coating parameters.
+
+Materials (constant indices): MgF₂ 1.38, SiO₂ 1.46, Al₂O₃ 1.63, HfO₂ 1.95,
+Ta₂O₅ 2.10, TiO₂ 2.45, ZnS 2.35, a‑Si 3.95, K8 1.52, fused quartz 1.46,
+Sitall 1.54. Substrate: BK7 1.52. Wavelengths and thicknesses in nm. Layer 1
+is adjacent to the substrate everywhere in the application and in the export.
 
 ## Run locally
 
-Requires **Node.js 20 or newer**. There are no packages to install.
+Requires Node.js 20 or newer; nothing to install.
 
 ```sh
-npm run dev
+npm run dev      # http://127.0.0.1:4173
+npm test         # numerical verification and export checks
+npm run build    # standalone static application in dist/
 ```
 
-Open [http://127.0.0.1:4173](http://127.0.0.1:4173).
-
-```sh
-npm test
-npm run build
-```
-
-The build creates a standalone static application in `dist/`. Serve that directory with any static HTTP server. For a local build preview:
-
-```sh
-node scripts/serve.mjs dist
-```
-
-Use HTTP rather than opening `index.html` directly; the application uses JavaScript modules.
-
-## Demonstrate a synthesis
-
-The initial demonstration is a 95% reflector over **450–650 nm**, starting from 100 nm of Ta2O5 on BK7. With the supplied limits it reaches the `10⁻⁴` MSE threshold. Broader or sharper targets can need more layers, optical thickness or evolution cycles.
-
-1. Open **Design settings** to choose the low- and high-index materials, starting material, and starting geometric thickness.
-2. Set the wavelength interval and spectral sample count. Choose **Mirror**, **Edge filter**, **Anti-reflection**, or **Band reflector** as a starting target.
-3. Drag a target level vertically to change reflectance. Drag a boundary horizontally to move it in wavelength, including the two interval-end handles. **Edit target** provides numerical band editing.
-4. Set the maximum layer count, maximum **total optical thickness** `Σ nᵢdᵢ`, and **Target merit**. The merit is the mean squared difference between computed and target fractional reflectance.
-5. Select **Start evolution**; the same button pauses and resumes the run. Use **Pace** to change demonstration speed and **Present** for a larger presentation view. The stop control keeps the best observed design; reset returns to the starting layer.
-6. Inspect **Needle sensitivity**, select a layer in **The living stack**, and open **Layer recipe**. Choose **Export Excel** to download the result.
-
-Negative needle sensitivity identifies a promising replacement of host material. A growth step can temporarily raise the merit: this is an intentional part of Gradual Evolution. The solver retains the best feasible design found.
-
-The `.xlsx` workbook includes the target and computed spectrum, residuals, layer materials and refractive indices, geometric and optical thicknesses, run settings, and recorded evolution checkpoints. Layer 1 faces air in both the application and export.
-
-The needle chart retains the **last scanned structure** while refinement changes the current stack. Intermediate LM frames are batched for presentation; the numerical solver still evaluates every accepted step.
-
-## Version 1.2 engineering dashboard
-
-The spectrum has a substantially larger plotting area, with a fine vector grid and wavelength ticks adapted to the available width. Needle sensitivity and convergence are grouped at the right; the physical stack, insertion detail and live numerical summary sit below. All remain visible together on a desktop. Click the spectrum away from a target handle to inspect wavelength, target/current reflectance and signed error in percentage points. **Fit R** expands small reflectance differences vertically; **Full R** restores the full physical 0–100% range.
-
-**Merit function** now labels the actual nonnegative MSE on its logarithmic axis, such as `0.01` or `1e−4`, rather than displaying negative values of `log10(MSE)`. A dashed green guide marks the requested limit. Exact zero gets its own explicitly explained marker below the positive logarithmic range. Negative values on **Needle sensitivity** are valid derivatives and identify improving insertion directions.
-
-See [version 1.2 release notes](docs/RELEASE-v1.2.0.md).
-
-## Version 1.1 verification and presentation
-
-- **Live** holds a needle insertion for 1.9 seconds; **Cinematic** holds it for 3.2 seconds. The local detail enlarges the insertion neighborhood while preserving relative thicknesses. Pause freezes the numerical stage and visual motion; Fast removes presentation holds.
-- At completion, an independent denser wavelength grid includes the requested points and both sides of every target jump. The final displayed spectrum uses this grid. The main merit remains the objective on the requested optimization points; the status reports the separate dense check.
-- Excel preserves the original **Spectrum** sheet and adds **Verification**, including the denser spectrum, residuals and boundary probes. This is a finite sampling check, not a proof of a continuous-band tolerance.
-- The numerical audit checks Fresnel reflectance, energy conservation, analytic sensitivities, constrained LM, growth, cleanup and the retained best design. Compensated phase evaluation improves narrow-resonance accuracy. See [verification evidence](docs/VERIFICATION.md) and [release notes](docs/RELEASE-v1.1.0.md).
-
-## Physical model
-
-- Normal incidence from air, `n = 1`, onto a coating on semi-infinite BK7, `n = 1.52`.
-- Two homogeneous, isotropic materials with constant real refractive indices; no absorption or dispersion.
-- Wavelengths and thicknesses in nanometers; reflectance is an energy coefficient between 0 and 1.
-- Analytic characteristic-matrix thickness and needle derivatives, with constrained Levenberg–Marquardt refinement.
-
-Catalog names represent the specified ideal constant-index model, including materials that absorb or disperse in real use. Results are numerical designs under these assumptions, not manufacturing qualification. A requested target may be unattainable; termination and merit describe what the bounded local search achieved.
-
-Read [the mathematical method and verification references](docs/METHOD.md) for equations, the actual search policy, limits, and source page numbers.
+Serve the files over HTTP (the application uses JavaScript modules).
 
 ## Repository
 
-- `src/optics.js` — forward optical model and analytic sensitivities.
-- `src/optimizer.js` — constrained refinement and Gradual Evolution.
-- `src/export.js` — genuine Office Open XML workbook export.
-- `tests/` — numerical and export checks.
-- `docs/METHOD.md` — mathematical conventions and references.
+- `src/optics.js` — admittance recursion, adjoint function, analytic Jacobian and needle derivative, needle insertion, thin‑layer cleanup.
+- `src/refine.js` — constrained Levenberg–Marquardt refinement (generator, yields frames).
+- `src/synthesis.js` — needle cycle, gradual evolution, cleanup, termination; emits events for the interface.
+- `src/charts.js` — canvas charts: interactive target editor, needle derivative, coating structure, merit history.
+- `src/app.js` — settings, runner with demonstration pacing and animation, export.
+- `src/xlsx.js` — dependency‑free Excel writer.
+- `tests/` — verification against closed forms, an independent matrix code, finite differences, the specification's worked example and the book's designs.
 
-Source books and private reference documents are not distributed with this release.
+Release notes: [docs/RELEASE-v2.0.0.md](docs/RELEASE-v2.0.0.md). The source
+books and the private method specification are not distributed with this
+repository.
