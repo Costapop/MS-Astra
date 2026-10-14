@@ -176,7 +176,7 @@ export function* synthesize(cfg) {
       }
     }
     if (reached(F, dc)) { reason = 'Target merit reached'; break; }
-    if (Date.now() - t0 > budgetMs) { reason = 'Time budget exhausted'; break; }
+    if (Date.now() - t0 > budgetMs) { reason = `Time budget exhausted (${(budgetMs / 1000).toFixed(0)} s)`; break; }
 
     // ---------------- needle cycle ----------------
     for (let needleStep = 0; needleStep < 200; needleStep++) {
@@ -251,23 +251,28 @@ export function* synthesize(cfg) {
     }
     dc = denseCheck(layers);
     if (reached(F, dc)) { reason = 'Target merit reached'; break; }
-    if (Date.now() - t0 > budgetMs) { reason = 'Time budget exhausted'; break; }
+    if (Date.now() - t0 > budgetMs) { reason = `Time budget exhausted (${(budgetMs / 1000).toFixed(0)} s)`; break; }
 
     // ---------------- gradual evolution: thickness growth ----------------
     const tot = totalOpticalThickness(layers);
-    if (tot >= maxTOT - 1e-9) { reason = 'Optical‑thickness limit reached'; break; }
+    if (tot >= maxTOT - 1e-9) { reason = `Optical‑thickness limit reached (${maxTOT} nm)`; break; }
     yield { type: 'stage', stage: 'growth' };
     const growth = growthSearch(layers, problem, { lamMin, lamMax, maxTOT });
-    if (!growth) { reason = 'No admissible thickness growth within the optical‑thickness limit'; break; }
+    if (!growth) { reason = `No admissible thickness growth within the optical‑thickness limit (${maxTOT} nm)`; break; }
     stats.growths++;
     const grown = copy(layers); grown[growth.layer].d += growth.s;
     yield { type: 'growth', layer: growth.layer, from: layers[growth.layer].d, to: grown[growth.layer].d, curve: growth.curve, layers: grown, R: reflectance(grown, problem.wavelengths, ns, na), F: growth.F, Fparent: F };
     const r4 = yield* doRefine(grown, 'Refinement after growth');
     layers = dropZeroLayers(r4.layers, startMat); F = r4.F; keepBest(layers, F);
 
-    if (F < cycleStartF * (1 - 1e-4)) noProgress = 0; else if (++noProgress >= 3) { reason = 'No further progress'; }
+    if (F < cycleStartF * (1 - 1e-4)) noProgress = 0;
+    else if (++noProgress >= 3) {
+      reason = layers.length >= maxLayers
+        ? `Layer limit reached (${maxLayers} layers): no needle can be inserted and thickness growth gives no further progress`
+        : 'No further progress: no needle lowers the merit after refinement and thickness growth did not help in three cycles';
+    }
   }
-  if (!reason) reason = 'Cycle budget exhausted';
+  if (!reason) reason = `Cycle budget exhausted (${maxCycles} cycles)`;
 
   // ---------------- final: cleanup + final refinement, report best ----------------
   yield { type: 'stage', stage: 'final' };
@@ -289,6 +294,34 @@ export function* synthesize(cfg) {
   const Ff = merit(Rf, problem.target, problem.weights);
   const dcf = denseCheck(layers);
   if (reason === 'Target merit reached' && !reached(Ff, dcf)) reason = dcf && Ff <= targetF ? 'Target merit reached on the optimization grid but not on the dense check grid' : reason;
+  if (reason === 'Target merit reached') reason = `Target merit reached (F = ${Ff.toExponential(2)} ≤ ${targetF.toExponential(0)})`;
+
+  // ---------------- final needle scan: evidence that insertions no longer help ----------------
+  {
+    const evF = evaluate(layers, problem.wavelengths, problem.target, problem.weights, ns, na, true);
+    const scanF = scanNeedles(layers, evF.adjoint, problem.wavelengths, other);
+    const top = scanF.candidates.slice(0, Math.max(1, kCand > 0 ? kCand : 3)).slice(0, 5);
+    const trials = [];
+    for (const cand of top) {
+      const mat = matByIndex(cand.nm);
+      const etaMax = cand.kind === 'interior' ? 2 * Math.min(cand.x, layers[cand.layer].d - cand.x) : eta0;
+      let eta = Math.min(eta0, etaMax * 0.5), trial = null, Ft = Infinity;
+      while (eta >= 1e-3) { trial = insertNeedle(layers, cand, eta, mat); Ft = evalF(trial); if (Ft <= Ff + 1e-4 * eta * cand.g) break; eta *= 0.5; trial = null; }
+      let Fref = null, nl = null;
+      if (trial) { const r = refineToEnd(trial, problem, lmOpts); const cl = dropZeroLayers(r.layers, startMat); Fref = evalF(cl); nl = cl.length; }
+      trials.push({ layer: cand.layer, kind: cand.kind, z: cand.z, g: cand.g, material: mat.m, eta: trial ? eta : null, Finsert: trial ? Ft : null, Frefined: Fref, layers: nl, delta: Fref != null ? Fref / Ff - 1 : null, withinLayerLimit: layers.length + (cand.kind === 'interior' ? 2 : 1) <= maxLayers });
+    }
+    const improving = trials.filter((t) => t.delta != null && t.delta < -eps);
+    let verdict;
+    if (!scanF.candidates.length) verdict = { kind: 'stationary', text: 'Needle‑stationary design: g(z) ≥ 0 everywhere — no insertion lowers the merit to first order.' };
+    else if (!improving.length) verdict = { kind: 'no-gain', text: `${scanF.candidates.length} negative minim${scanF.candidates.length > 1 ? 'a' : 'um'} of g(z), but none of the ${trials.length} best lowers F after refinement (ΔF ≥ 0).` };
+    else {
+      const b = improving.sort((p, q) => p.delta - q.delta)[0];
+      const why = layers.length >= maxLayers ? ` — blocked by the layer limit (${maxLayers})` : totalOpticalThickness(layers) >= maxTOT - 1e-9 ? ` — blocked by the optical‑thickness limit (${maxTOT} nm)` : reason.startsWith('Target') ? ' — not needed: the target is reached' : ' — the run stopped by its budget';
+      verdict = { kind: 'possible', text: `An insertion could still lower F by ${(100 * -b.delta).toFixed(1)} % (${b.material} at z = ${b.z.toFixed(1)} nm)${why}.` };
+    }
+    yield { type: 'final-scan', z: scanF.z, g: scanF.g, layer: scanF.layer, total: scanF.total, candidates: scanF.candidates.slice(0, 8), trials, verdict, layers: copy(layers), F: Ff };
+  }
   const done = {
     type: 'done', layers: copy(layers), R: Rf, F: Ff, reason, stats, opticalThickness: totalOpticalThickness(layers),
     grid: { wavelengths: Float64Array.from(problem.wavelengths), target: Float64Array.from(problem.target), weights: Float64Array.from(problem.weights) },

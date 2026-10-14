@@ -84,7 +84,7 @@ export class SpectrumChart extends Plot {
   constructor(canvas, tooltip) {
     super(canvas, { l: 66, r: 18, t: 26, b: 34 });
     this.tooltip = tooltip;
-    this.state = { lambdaMin: 400, lambdaMax: 700, bands: [], grid: null, target: null, R: null, weights: null, added: null, curve: null, transition: 0, yMode: 'full', editable: true };
+    this.state = { lambdaMin: 400, lambdaMax: 700, bands: [], grid: null, target: null, R: null, weights: null, added: null, curve: null, transition: 0, yMode: 'full', editable: true, ghosts: [], ghostHighlight: null };
     this.onChange = null;      // (patch) => void
     this.hover = null; this.drag = null;
     const c = canvas;
@@ -106,6 +106,7 @@ export class SpectrumChart extends Plot {
       let lo = Infinity, hi = -Infinity;
       const scan = (arr) => { if (arr) for (let i = 0; i < arr.length; i++) { lo = Math.min(lo, arr[i]); hi = Math.max(hi, arr[i]); } };
       scan(s.target); scan(s.R); if (s.curve) scan(s.curve.R);
+      for (const gh of s.ghosts || []) scan(gh.R);
       if (!Number.isFinite(lo)) { lo = 0; hi = 1; }
       const p = Math.max((hi - lo) * 0.15, 0.005);
       y0 = Math.max(0, lo - p); y1 = Math.min(1, hi + p);
@@ -234,6 +235,27 @@ export class SpectrumChart extends Plot {
       }
       ctx.restore();
     }
+    // ghost spectra of explored starting designs
+    if (s.ghosts && s.ghosts.length) {
+      const order = s.ghosts.map((g, i) => i).sort((a, b) => (s.ghosts[a].best ? 1 : 0) - (s.ghosts[b].best ? 1 : 0) || (a === s.ghostHighlight ? 1 : 0) - (b === s.ghostHighlight ? 1 : 0));
+      for (const i of order) {
+        const gh = s.ghosts[i]; if (!gh.R) continue;
+        const hl = i === s.ghostHighlight;
+        ctx.beginPath();
+        for (let k = 0; k < gh.wl.length; k++) { const x = xs(gh.wl[k]), y = ys(gh.R[k]); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+        if (hl) { ctx.strokeStyle = T.needle; ctx.lineWidth = 2.5; ctx.globalAlpha = 1; ctx.setLineDash([]); }
+        else if (gh.best) { ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2; ctx.globalAlpha = 0.75; ctx.setLineDash([6, 4]); }
+        else { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 1.2; ctx.globalAlpha = 0.4; ctx.setLineDash([]); }
+        ctx.stroke(); ctx.globalAlpha = 1; ctx.setLineDash([]);
+      }
+      const hl = s.ghostHighlight != null ? s.ghosts[s.ghostHighlight] : null;
+      if (hl) {
+        let mean = 0; if (s.target && s.target.length) { for (let k = 0; k < s.target.length; k++) mean += s.target[k]; mean /= s.target.length; }
+        const top = mean <= 0.5;
+        ctx.fillStyle = T.ink; ctx.font = `600 11px ${T.font}`; ctx.textAlign = 'left'; ctx.textBaseline = top ? 'top' : 'bottom';
+        ctx.fillText(`${hl.name} · F = ${fmt.sci(hl.F)} · ${hl.layers} layers`, fr.x0 + 8, top ? fr.y0 + 4 : fr.y1 - 4); ctx.font = `11px ${T.font}`;
+      }
+    }
     // current R: dense display curve (or grid values) as area + line
     const cw = s.curve ? s.curve.wl : s.grid, cR = s.curve ? s.curve.R : s.R;
     if (cw && cR) {
@@ -299,7 +321,7 @@ export class NeedleChart extends Plot {
   constructor(canvas, tooltip) {
     super(canvas, { l: 66, r: 18, t: 16, b: 34 });
     this.tooltip = tooltip;
-    this.state = { xmax: 1, layers: [], scan: null, candidate: null, insertion: null, stale: false, Hkey: 'H', Lkey: 'L' };
+    this.state = { xmax: 1, layers: [], scan: null, candidate: null, insertion: null, stale: false, Hkey: 'H', Lkey: 'L', annotations: null, banner: null };
     canvas.addEventListener('pointermove', (e) => this.onMove(e));
     canvas.addEventListener('pointerleave', () => { this.tooltip.hidden = true; });
   }
@@ -381,6 +403,30 @@ export class NeedleChart extends Plot {
       const x0 = xs(ins.z - ins.width / 2), x1 = xs(ins.z + ins.width / 2);
       ctx.fillStyle = T['needle-fill']; ctx.fillRect(x0, fr.y0, Math.max(2, x1 - x0), fr.y1 - fr.y0);
       ctx.strokeStyle = T.needle; ctx.lineWidth = 1; ctx.strokeRect(Math.round(x0) + 0.5, fr.y0 + 0.5, Math.max(2, x1 - x0), fr.y1 - fr.y0 - 1);
+    }
+    // final-state annotations: tested insertions with their refined ΔF
+    if (s.annotations && s.annotations.length) {
+      s.annotations.forEach((a, ai) => {
+        const x = xs(a.z), y = ys(a.g / unit);
+        const below = ai % 2 === 1;
+        ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fillStyle = T.card; ctx.fill();
+        ctx.strokeStyle = a.gain ? T.good : T.bad; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = T.ink; ctx.font = `600 10px ${T.font}`; ctx.textBaseline = below ? 'top' : 'bottom';
+        const tw = ctx.measureText(a.label).width; let lx = x; ctx.textAlign = 'center';
+        if (lx - tw / 2 < fr.x0 + SUB_W) { lx = fr.x0 + SUB_W + tw / 2 + 2; } if (lx + tw / 2 > fr.x1) { lx = fr.x1 - tw / 2 - 2; }
+        ctx.fillText(a.label, lx, below ? y + 9 : y - 9);
+        ctx.font = `11px ${T.font}`;
+      });
+    }
+    if (s.banner) {
+      ctx.font = `600 11px ${T.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      const tw = ctx.measureText(s.banner).width;
+      let allPos = true; if (s.scan) for (let i = 0; i < s.scan.g.length; i++) if (s.scan.g[i] < 0) { allPos = false; break; }
+      const bx = fr.x0 + SUB_W + 6, bh = 20, by = allPos ? fr.y1 - bh - 4 : fr.y0 + 4, bw = Math.min(tw + 16, fr.x1 - bx - 4);
+      ctx.fillStyle = s.bannerKind === 'possible' ? T.needle : T.good; ctx.globalAlpha = 0.14; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 10); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = s.bannerKind === 'possible' ? T.needle : T.good;
+      ctx.save(); ctx.beginPath(); ctx.rect(bx, by, bw, bh); ctx.clip(); ctx.fillText(s.banner, bx + 8, by + bh / 2); ctx.restore();
+      ctx.font = `11px ${T.font}`;
     }
     // candidate marker
     if (s.candidate) {

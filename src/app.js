@@ -9,7 +9,7 @@ import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
 
-export const VERSION = '2.1.0';
+export const VERSION = '2.1.1';
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------------ */
@@ -125,7 +125,7 @@ function syncForm() {
   $('transition').value = settings.transition;
   fillSelect($('mat-h'), LAYER_MATERIALS, settings.H); fillSelect($('mat-l'), LAYER_MATERIALS, settings.L); fillSelect($('substrate'), SUBSTRATES, settings.substrate);
   for (const b of $('start-material').querySelectorAll('button')) { const on = b.dataset.start === settings.startMaterial; b.classList.toggle('active', on); b.setAttribute('aria-checked', on); }
-  for (const b of $('start-mode').querySelectorAll('button')) { const on = b.dataset.mode === settings.startMode; b.classList.toggle('active', on); b.setAttribute('aria-checked', on); }
+  $('multi-start').checked = settings.startMode === 'multi';
   $('start-thickness').value = settings.startThickness;
   $('explore-budget').value = settings.exploreBudget;
   $('row-budget').hidden = settings.startMode !== 'multi';
@@ -162,7 +162,7 @@ function bindForm() {
   $('mat-l').addEventListener('change', () => { settings.L = $('mat-l').value; onSettingsChanged(); });
   $('substrate').addEventListener('change', () => { settings.substrate = $('substrate').value; onSettingsChanged(); });
   for (const b of $('start-material').querySelectorAll('button')) b.addEventListener('click', () => { settings.startMaterial = b.dataset.start; onSettingsChanged(); });
-  for (const b of $('start-mode').querySelectorAll('button')) b.addEventListener('click', () => { settings.startMode = b.dataset.mode; onSettingsChanged(); });
+  $('multi-start').addEventListener('change', () => { settings.startMode = $('multi-start').checked ? 'multi' : 'single'; onSettingsChanged(); });
   num('start-thickness', 'startThickness');
   num('explore-budget', 'exploreBudget');
   num('max-layers', 'maxLayers', (v) => Math.round(Number(v)));
@@ -213,7 +213,7 @@ const view = {
   layers: [], tauD: 0.08,
   xmax: 1, goalXmax: 1,
   highlight: null, insertion: null, candidate: null,
-  displayGrid: null, curve: null, curveDirty: true,
+  displayGrid: null, curve: null, curveDirty: true, hideCurve: false,
 };
 const run = {
   gen: null, running: false, paused: false, finished: false, exploring: false, worker: null,
@@ -221,7 +221,9 @@ const run = {
   stepTo: null,
   history: [], events: 0, F0: null, lastResult: null, cycle: 0, stage: '', engineLayers: [], problem: null, added: new Set(),
   dense: null, startName: null, exploreResults: [], exploreRanked: null, cfg: null,
+  ghosts: [], logExpanded: false,
 };
+const LOG_TAIL = 5;
 const SPEED = { cinematic: 2.2, live: 1, fast: 0.25, instant: 0 };
 const HOLD = { start: 500, stage: 0, refine: 5, refined: 260, cycle: 200, scan: 950, compare: 900, needle: 1500, 'needle-rejected': 450, growth: 1400, cleanup: 950, note: 500, dense: 250, grid: 900, done: 0 };
 
@@ -252,7 +254,9 @@ function setInitialDesign() {
   $('result-line').textContent = ''; $('result-line').classList.remove('good');
   $('cycle-label').textContent = 'Not started';
   $('explore-list').hidden = true; $('explore-list').innerHTML = ''; $('btn-starts').hidden = true; document.querySelector('#card-stats .tiles').hidden = false;
-  $('log').innerHTML = '';
+  run.ghosts = []; view.hideCurve = false; spectrum.set({ ghosts: [], ghostHighlight: null }); $('legend-ghost').hidden = true;
+  needle.set({ annotations: null, banner: null });
+  $('log').innerHTML = ''; run.logExpanded = false; $('btn-log-all').hidden = true;
   $('btn-export').disabled = true;
   run.lastResult = null; run.history = []; run.F0 = F; run.events = 0; run.engineLayers = layers;
   updateCurve(true);
@@ -288,12 +292,21 @@ function log(kind, html) {
   li.innerHTML = `<span class="tag">${kind}</span><span>${html}</span>`;
   ol.appendChild(li);
   while (ol.children.length > 400) ol.removeChild(ol.firstChild);
+  updateLogView();
+}
+
+function updateLogView() {
+  const ol = $('log'); const items = ol.children; const n = items.length;
+  for (let i = 0; i < n; i++) items[i].classList.toggle('folded', !run.logExpanded && i < n - LOG_TAIL);
+  const btn = $('btn-log-all'); btn.hidden = n <= LOG_TAIL;
+  btn.textContent = run.logExpanded ? `Last ${LOG_TAIL} only` : `Show all (${n})`;
   ol.scrollTop = ol.scrollHeight;
 }
 
 function pushHistory(F, mark) { run.history.push({ F, mark }); meritChart.set({ history: run.history }); }
 
 function updateCurve(force) {
+  if (view.hideCurve) { if (spectrum.state.curve) spectrum.set({ curve: null }); return; }
   if (!view.displayGrid || (!view.curveDirty && !force)) return;
   const layers = view.layers.map((L) => ({ n: L.n, d: Math.max(0, L.d) }));
   const R = reflectance(layers, view.displayGrid, substrate().n);
@@ -303,6 +316,15 @@ function updateCurve(force) {
 }
 
 function syncStructure() { structure.set({ layers: view.layers, xmax: view.xmax, highlight: view.highlight }); }
+function highlightGhost(index) {
+  const list = run.ghosts.filter(Boolean);
+  const gh = index != null ? run.ghosts[index] : null;
+  spectrum.set({ ghostHighlight: gh ? list.indexOf(gh) : null });
+  if (gh) {
+    const disp = toDisplayLayers(gh.design); const total = gh.design.reduce((a, L) => a + L.d, 0);
+    structure.set({ layers: disp, xmax: Math.max(view.xmax, total * 1.06), highlight: null });
+  } else syncStructure();
+}
 function matLabel(n) { return n === materialH().n ? materialH().label : materialL().label; }
 
 /* ------------------------------------------------------------------ */
@@ -445,6 +467,15 @@ function applyEvent(ev, snap) {
       break;
     }
     case 'note': { log('note', ev.text); break; }
+    case 'final-scan': {
+      view.scanTotal = ev.total;
+      const annotations = ev.trials.map((t) => ({ z: t.z, g: t.g, gain: t.delta != null && t.delta < -1e-6, label: t.delta == null ? 'no admissible width' : `ΔF ${t.delta >= 0 ? '+' : '−'}${(100 * Math.abs(t.delta)).toFixed(2)} %` }));
+      needle.set({ scan: { z: ev.z, g: ev.g, layer: ev.layer }, layers: toDisplayLayers(ev.layers), candidate: null, insertion: null, stale: false, annotations, banner: ev.verdict.text, bannerKind: ev.verdict.kind });
+      view.goalXmax = Math.max(50, ev.total * 1.06);
+      const rows = ev.trials.map((t) => `<tr><td>${t.material} in ${t.kind === 'interior' ? `layer ${t.layer + 1}` : t.kind === 'substrate' ? 'substrate side' : 'air side'}</td><td>${t.z.toFixed(1)} nm</td><td>${t.g.toExponential(2)}</td><td>${t.Frefined != null ? fmt.sci(t.Frefined) : (t.eta == null ? 'no admissible width' : '—')}</td><td>${t.delta != null ? `${t.delta >= 0 ? '+' : '−'}${(100 * Math.abs(t.delta)).toFixed(2)} %` : '—'}</td></tr>`).join('');
+      log('final', `Final needle check (F = ${fmt.sci(ev.F)}): ${ev.verdict.text}${ev.trials.length ? `<table class="cmp"><tr><th>candidate</th><th>z</th><th>g, nm⁻¹</th><th>F after refinement</th><th>ΔF</th></tr>${rows}</table>` : ''}`);
+      break;
+    }
     case 'done': {
       layersFromEvent(ev.layers, { animate: !snap });
       view.goalR = ev.R; if (snap) view.R = Float64Array.from(ev.R);
@@ -453,13 +484,13 @@ function applyEvent(ev, snap) {
       pushHistory(ev.F, 'done');
       if (ev.dense) run.dense = { F: ev.dense.F, maxDev: ev.dense.maxDev, points: ev.dense.wavelengths.length };
       run.problem = { grid: ev.grid.wavelengths, target: ev.grid.target, weights: ev.grid.weights };
-      updateTiles({ F: ev.F, layers: ev.layers, stage: 'Finished' });
+      updateTiles({ F: ev.F, layers: ev.layers, stage: `Finished · ${ev.reason}` });
       run.lastResult = { layers: ev.layers, R: ev.R, F: ev.F, reason: ev.reason, stats: ev.stats, dense: ev.dense, grid: ev.grid, elapsedMs: ev.elapsedMs };
       run.finished = true; run.running = false;
       const ok = ev.F <= settings.targetMerit && (!ev.dense || ev.dense.F <= settings.targetMerit);
       setStage(`Finished — ${ev.reason}`, 'done');
       const rl = $('result-line');
-      rl.textContent = `${run.startName ? `Start «${run.startName}»${run.exploreRanked ? ` (best of ${run.exploreRanked.length})` : ''}. ` : ''}${ev.reason}. ${ev.layers.length} layers, F = ${fmt.sci(ev.F)}, RMS ${(100 * Math.sqrt(ev.F)).toFixed(3)} %${ev.dense ? ` (dense grid ${(100 * Math.sqrt(ev.dense.F)).toFixed(3)} %, max ${(100 * ev.dense.maxDev).toFixed(2)} p.p.)` : ''}, optical thickness ${ev.opticalThickness.toFixed(0)} nm.`;
+      rl.innerHTML = `<b>${ev.reason}.</b> ${run.startName ? `Start «${run.startName}»${run.exploreRanked ? ` (best of ${run.exploreRanked.length})` : ''}. ` : ''}${ev.layers.length} layers, F = ${fmt.sci(ev.F)}, RMS ${(100 * Math.sqrt(ev.F)).toFixed(3)} %${ev.dense ? ` (dense grid ${(100 * Math.sqrt(ev.dense.F)).toFixed(3)} %, max ${(100 * ev.dense.maxDev).toFixed(2)} p.p.)` : ''}, optical thickness ${ev.opticalThickness.toFixed(0)} nm.`;
       rl.classList.toggle('good', ok);
       log('done', `${ev.reason}. Final design: ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>${ev.dense ? `, dense‑grid F = ${fmt.sci(ev.dense.F)}` : ''}. Needles ${ev.stats.needles} (of ${ev.stats.compared} refined alternatives), growth steps ${ev.stats.growths}, thin layers removed ${ev.stats.cleanups}${ev.stats.pointsAdded ? `, grid points added ${ev.stats.pointsAdded}` : ''}, ${(ev.elapsedMs / 1000).toFixed(1)} s of computation.`);
       $('btn-run').textContent = 'Start synthesis'; $('btn-export').disabled = false; $('btn-step').disabled = true;
@@ -491,8 +522,13 @@ function startExploration() {
   const cfg = { ...run.cfg, budgetMs: 1000 * settings.exploreBudget };
   const list = startDesigns(cfg, lambdaCenter());
   run.exploring = true; run.gen = null; run.exploreResults = [];
-  const ol = $('explore-list'); ol.hidden = false; ol.innerHTML = ''; document.querySelector('#card-stats .tiles').hidden = true;
-  list.forEach((s, i) => { const li = document.createElement('li'); li.id = `explore-${i}`; li.innerHTML = `<span class="n">${i + 1}. ${s.name}</span><span class="f">—</span><span class="l"></span>`; ol.appendChild(li); });
+  const ol = $('explore-list'); ol.hidden = false; ol.innerHTML = ''; ol.classList.add('exploring'); document.querySelector('#card-stats .tiles').hidden = true;
+  list.forEach((s, i) => {
+    const li = document.createElement('li'); li.id = `explore-${i}`; li.innerHTML = `<span class="n">${i + 1}. ${s.name}</span><span class="f">—</span><span class="l"></span>`;
+    li.addEventListener('mouseenter', () => highlightGhost(i)); li.addEventListener('mouseleave', () => highlightGhost(null));
+    ol.appendChild(li);
+  });
+  view.hideCurve = true; spectrum.set({ curve: null, R: null, ghosts: run.ghosts, ghostHighlight: null }); $('legend-ghost').hidden = false;
   setStage(`Exploring ${list.length} starting designs in the background…`, 'running');
   $('cycle-label').textContent = 'Exploration';
   log('explore', `Multi‑start: ${list.length} starting designs, up to ${settings.exploreBudget} s each. The best result is replayed afterwards.`);
@@ -503,6 +539,10 @@ function startExploration() {
       setStage(`Exploring starting design ${ev.index + 1} of ${ev.total}: ${ev.name}`, 'running');
     } else if (ev.type === 'explore-result') {
       run.exploreResults.push(ev);
+      const Rg = reflectance(ev.layers.map((L) => ({ n: L.n, d: L.d })), view.displayGrid, substrate().n);
+      run.ghosts[ev.index] = { wl: view.displayGrid, R: Rg, name: ev.name, F: ev.score, layers: ev.layers.length, design: ev.layers, best: false };
+      let bi = -1; run.ghosts.forEach((g, i) => { if (g && (bi < 0 || g.F < run.ghosts[bi].F)) bi = i; }); run.ghosts.forEach((g, i) => { if (g) g.best = i === bi; });
+      spectrum.set({ ghosts: run.ghosts.filter(Boolean).map((g) => g) });
       const li = $(`explore-${ev.index}`);
       if (li) { li.classList.remove('running'); li.querySelector('.f').textContent = `F ${fmt.sci(ev.score)}`; li.querySelector('.l').textContent = `${ev.layers.length} L`; }
       log('explore', `Start «${ev.name}»: ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>${ev.Fdense != null ? ` (dense ${fmt.sci(ev.Fdense)})` : ''}, ${ev.reason.toLowerCase()}, ${(ev.elapsedMs / 1000).toFixed(1)} s.`);
@@ -513,7 +553,8 @@ function startExploration() {
       ev.results.forEach((r, rank) => { const li = $(`explore-${r.index}`); if (li) { li.classList.toggle('best', rank === 0); if (rank === 0) li.querySelector('.n').textContent = `★ ${r.name}`; } });
       log('explore', `Best starting design: «${best.name}» (F = ${fmt.sci(best.F)}, ${best.layers.length} layers). Replaying its evolution.`);
       run.startName = best.name; run.exploreRanked = ev.results;
-      $('explore-list').hidden = true; document.querySelector('#card-stats .tiles').hidden = false; $('btn-starts').hidden = false;
+      document.querySelector('#card-stats .tiles').hidden = false; $('btn-starts').hidden = false; $('explore-list').classList.remove('exploring');
+      view.hideCurve = false; view.curveDirty = true;
       run.gen = synthesize({ ...run.cfg, start: { ...best.start, name: best.name } });
       run.holdUntil = 0;
       setStage(`Replaying the best start: ${best.name}`, 'running');
@@ -673,6 +714,7 @@ function init() {
   $('btn-recipe').addEventListener('click', showRecipe);
   $('recipe-close').addEventListener('click', () => $('recipe-dialog').close());
   $('btn-starts').addEventListener('click', showStarts);
+  $('btn-log-all').addEventListener('click', () => { run.logExpanded = !run.logExpanded; updateLogView(); });
   $('starts-close').addEventListener('click', () => $('starts-dialog').close());
   document.addEventListener('keydown', (e) => {
     if (e.target !== document.body) return;
