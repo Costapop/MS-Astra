@@ -4,9 +4,10 @@
  * Minimises F(d) = Σ_l ν_l (R_l(d) − R̃_l)² with the analytic Jacobian
  * ∂R_l/∂d_j from optics.evaluate (doc §8.2, eq. 8.8–8.11):
  *     (JᵀJ + μ·diag(JᵀJ)) Δd = −Jᵀe,    e_l = √ν_l (R_l − R̃_l)
- * subject to d_j ≥ 0 (active‑set projection) and, optionally,
- * Σ n_j d_j ≤ TOTmax (step backtracking). Damping follows Nielsen's
- * gain‑ratio update.
+ * subject to d_j ≥ d_min (active‑set projection; d_min = 0 by default, or the
+ * thin‑layer threshold for the final refinement of a reported design, so that
+ * no layer can be driven below it) and, optionally, Σ n_j d_j ≤ TOTmax (step
+ * backtracking). Damping follows Nielsen's gain‑ratio update.
  *
  * `refine` is a generator: it yields a frame after every accepted step so the
  * interface can animate the evolution, and returns the final design.
@@ -48,8 +49,11 @@ export function* refine(layersIn, problem, options = {}) {
   const relTol = options.relTol ?? 1e-12;
   const stepTol = options.stepTol ?? 1e-7;
   const yieldEvery = options.yieldEvery ?? 1;
+  // lower bound of every thickness: 0, or the thin-layer threshold for a bounded (final) refinement;
+  // a layer that starts below the bound is lifted to it first
+  const lb = Math.max(0, options.minThickness ?? 0);
 
-  let layers = layersIn.map((L) => ({ ...L }));
+  let layers = layersIn.map((L) => ({ ...L, d: Math.max(lb, L.d) }));
   // optical-thickness bound: never exceed the limit, and never get worse if the start is already above it
   const totMax = Math.max(options.totMax ?? Infinity, totalOpticalThickness(layers));
   const N = layers.length;
@@ -69,7 +73,7 @@ export function* refine(layersIn, problem, options = {}) {
     // Assemble normal equations on the free set.
     // Active set: thickness at zero and the gradient pushes it negative.
     let nf = 0;
-    for (let j = 0; j < N; j++) if (!(layers[j].d <= 0 && cur.grad[j] > 0)) free[nf++] = j;
+    for (let j = 0; j < N; j++) if (!(layers[j].d <= lb && cur.grad[j] > 0)) free[nf++] = j;
     if (nf === 0) { reason = 'all variables at bounds'; break; }
     JtJ.fill(0); Jte.fill(0);
     for (let l = 0; l < Lc; l++) {
@@ -104,7 +108,7 @@ export function* refine(layersIn, problem, options = {}) {
       let smax = 0;
       for (let a = 0; a < nf; a++) {
         const j = free[a];
-        trial[j].d = Math.max(0, layers[j].d + step[a]);
+        trial[j].d = Math.max(lb, layers[j].d + step[a]);
         smax = Math.max(smax, Math.abs(trial[j].d - layers[j].d));
       }
       // total optical thickness bound: backtrack along the step if violated
@@ -112,7 +116,7 @@ export function* refine(layersIn, problem, options = {}) {
         let t = 1;
         for (let bt = 0; bt < 30 && totalOpticalThickness(trial) > totMax; bt++) {
           t *= 0.5;
-          for (let a = 0; a < nf; a++) { const j = free[a]; trial[j].d = Math.max(0, layers[j].d + t * step[a]); }
+          for (let a = 0; a < nf; a++) { const j = free[a]; trial[j].d = Math.max(lb, layers[j].d + t * step[a]); }
         }
         if (totalOpticalThickness(trial) > totMax) { mu *= nu; nu *= 2; continue; }
       }

@@ -9,7 +9,7 @@ import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
 
-export const VERSION = '2.3.1';
+export const VERSION = '2.3.2';
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------------ */
@@ -561,7 +561,9 @@ function applyEvent(ev, snap, opts = {}) {
       pushHistory(ev.F, 'cleanup');
       updateTiles({ F: ev.F, layers: ev.layers });
       needle.set({ stale: true, candidate: null, insertion: null });
-      log('cleanup', `${ev.final ? 'Final phase: ' : ''}${ev.removed} thin layer${ev.removed > 1 ? 's' : ''} (< ${settings.thinLayer} nm) removed; ${ev.before.length} → ${ev.layers.length} layers · F = ${fmt.sci(ev.F)} before re‑optimization.`);
+      log('cleanup', ev.pinned
+        ? `Final phase: ${ev.removed} layer${ev.removed > 1 ? 's' : ''} pinned at the ${settings.thinLayer} nm threshold removed — the design is better without ${ev.removed > 1 ? 'them' : 'it'}; ${ev.before.length} → ${ev.layers.length} layers · F = ${fmt.sci(ev.F)} before re‑optimization.`
+        : `${ev.final ? 'Final phase: ' : ''}${ev.removed} thin layer${ev.removed > 1 ? 's' : ''} (< ${settings.thinLayer} nm) removed; ${ev.before.length} → ${ev.layers.length} layers · F = ${fmt.sci(ev.F)} before re‑optimization.`);
       break;
     }
     case 'note': { log('note', ev.text); break; }
@@ -852,8 +854,12 @@ function showRecipe() {
   const layers = run.engineLayers || [];
   const lc = lambdaCenter();
   let z = 0;
-  const rows = layers.map((L, i) => { const r = `<tr><td>${i + 1}</td><td>${L.m}</td><td>${L.n.toFixed(2)}</td><td>${L.d.toFixed(2)}</td><td>${(L.n * L.d).toFixed(1)}</td><td>${(4 * L.n * L.d / lc).toFixed(3)}</td><td>${z.toFixed(1)}</td></tr>`; z += L.d; return r; });
-  $('recipe').innerHTML = `<thead><tr><th>#</th><th>Material</th><th>n</th><th>d, nm</th><th>nd, nm</th><th>QWOT @ ${lc.toFixed(0)} nm</th><th>z, nm</th></tr></thead><tbody>${rows.join('')}</tbody>
+  const thin = layers.filter((L) => L.d < settings.thinLayer).length;
+  const rows = layers.map((L, i) => { const r = `<tr${L.d < settings.thinLayer ? ' class="thin" title="Thinner than the threshold: removed at the next cleanup"' : ''}><td>${i + 1}</td><td>${L.m}</td><td>${L.n.toFixed(2)}</td><td>${L.d.toFixed(2)}</td><td>${(L.n * L.d).toFixed(1)}</td><td>${(4 * L.n * L.d / lc).toFixed(3)}</td><td>${z.toFixed(1)}</td></tr>`; z += L.d; return r; });
+  const caption = run.finished
+    ? `<caption>Reported design — every layer is at least ${settings.thinLayer} nm (thin‑layer threshold).</caption>`
+    : `<caption>Intermediate design — the synthesis is ${run.gen || run.exploring ? 'running' : 'not started'}: ${thin ? `${thin} layer${thin > 1 ? 's' : ''} thinner than ${settings.thinLayer} nm (marked) will be removed at the next cleanup; ` : ''}the reported design never contains a layer below the threshold.</caption>`;
+  $('recipe').innerHTML = `${caption}<thead><tr><th>#</th><th>Material</th><th>n</th><th>d, nm</th><th>nd, nm</th><th>QWOT @ ${lc.toFixed(0)} nm</th><th>z, nm</th></tr></thead><tbody>${rows.join('')}</tbody>
   <tfoot><tr><th colspan="3">Total (layer 1 at the substrate)</th><th>${layers.reduce((s, L) => s + L.d, 0).toFixed(1)}</th><th>${totalOpticalThickness(layers).toFixed(1)}</th><th></th><th></th></tr></tfoot>`;
   $('recipe-dialog').showModal();
 }

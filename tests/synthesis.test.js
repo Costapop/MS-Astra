@@ -373,3 +373,26 @@ test('the reported design is the best complete design within the limits that the
   }
   assert.ok(explained >= 2 && archived >= 2, `cases with explained lower values: ${explained}, archived designs: ${archived}, final-phase gains: ${exploited}`);
 });
+
+/* ---------------- v2.3.2: no reported layer below the thin-layer threshold ---------------- */
+test('the reported design never contains a layer thinner than the threshold (2–6 nm, every preset, random tasks)', () => {
+  let seed = 4242; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const cases = [];
+  for (const key of Object.keys(PRESETS)) for (const thin of [3, 5]) cases.push(anyConfig(key, { thin, points: 41 }));
+  const catalogue = ['MgF2', 'SiO2', 'Al2O3', 'HfO2', 'Ta2O5', 'TiO2', 'ZnS'].map((k) => materialByKey(k));
+  for (let i = 0; i < 10; i++) {
+    const a = 380 + Math.round(rnd() * 200), b = a + 150 + Math.round(rnd() * 400);
+    const bands = [{ from: a, to: Math.round((a + b) / 2), R: Math.round(rnd() * 100) / 100 }, { from: Math.round((a + b) / 2), to: b, R: Math.round(rnd() * 100) / 100 }];
+    let H = catalogue[Math.floor(rnd() * catalogue.length)], L = catalogue[Math.floor(rnd() * catalogue.length)]; if (H.n === L.n) { L = catalogue[0]; H = catalogue[5]; } if (H.n < L.n) [H, L] = [L, H];
+    const wl = uniformGrid(a, b, 31); const s = sampleTarget(bands, wl, 0);
+    cases.push({ wavelengths: wl, target: s.target, weights: s.weights, bands, transition: 0, ns: 1.52, na: 1, angle: rnd() < 0.4 ? Math.round(rnd() * 60) : 0, pol: 'avg', materials: { H: { n: H.n, m: H.key }, L: { n: L.n, m: L.key } }, start: { material: H.key, thickness: 50 + Math.round(rnd() * 150) }, maxLayers: 8 + Math.floor(rnd() * 24), maxOpticalThickness: 1000 + Math.round(rnd() * 4000), targetMerit: 1e-9, thinLayer: [2, 3, 4, 6][Math.floor(rnd() * 4)], budgetMs: 15000 });
+  }
+  for (const cfg of cases) {
+    const { done } = runAll(cfg);
+    const minD = Math.min(...done.layers.map((L) => L.d));
+    assert.ok(done.layers.length === 1 || minD >= cfg.thinLayer - 1e-9, `threshold ${cfg.thinLayer} nm: reported min d = ${minD.toFixed(3)} nm (${done.layers.length} layers, ${done.materials ? '' : cfg.materials.H.m + '/' + cfg.materials.L.m})`);
+    assert.ok(done.stop.verified, done.stop.checks.filter((c) => !c.ok).map((c) => `${c.name} [${c.detail}]`).join('; '));
+    // the archive guarantee still holds with the bounded final refinement
+    assert.match(done.stop.summary.guarantee, /lowest merit of any complete design/);
+  }
+});

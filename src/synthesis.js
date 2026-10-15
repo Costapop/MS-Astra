@@ -155,9 +155,12 @@ export function* synthesize(cfg) {
   const budgetText = () => cfg.budgetReason || `Time budget exhausted (${(budgetMs / 1000).toFixed(0)} s)`;
   const reached = (F, dc) => F <= targetF && (!dc || dc.F <= targetF);
 
-  function* doRefine(ls, label) {
+  // the final phase refines with the thin-layer threshold as a lower bound on every thickness, so that a
+  // reported design can never be driven below it; a layer pinned at the bound is then tested for removal
+  const lmFinal = { ...lmOpts, minThickness: dMin };
+  function* doRefine(ls, label, opts = lmOpts) {
     yield { type: 'stage', stage: 'refine', label };
-    const it = refine(ls, problem, lmOpts);
+    const it = refine(ls, problem, opts);
     for (;;) {
       const r = it.next();
       if (r.done) {
@@ -170,14 +173,40 @@ export function* synthesize(cfg) {
       yield { type: 'refine', layers: r.value.layers, R: r.value.R, F: r.value.F, iter: r.value.iter };
     }
   }
-  const silentRefine = (ls) => { const r = refineToEnd(ls, problem, lmOpts); stats.refinements++; stats.lmIterations += r.iterations; return r; };
-  /** Complete a refined design the way the run would report it: remove layers below the threshold and refine again. */
-  const completeDesign = (ls) => {
-    if (isComplete(ls) || ls.length <= 1) return { layers: ls, removed: 0 };
-    const c = cleanThinLayers(ls, dMin);
-    const r = silentRefine(c.layers);
-    return { layers: dropZeroLayers(r.layers, startMat), removed: c.removed };
+  const silentRefine = (ls, opts = lmOpts) => { const r = refineToEnd(ls, problem, opts); stats.refinements++; stats.lmIterations += r.iterations; return r; };
+  /** Layers pinned at the thin-layer bound by a bounded refinement: removed (neighbours absorb their optical thickness) when the design is better without them. */
+  const pinned = (ls) => ls.filter((L) => L.d <= dMin + 1e-9).length;
+  const prunePinnedSilent = (ls) => {
+    let F0 = evalF(ls), removed = 0;
+    for (let round = 0; round < 8 && pinned(ls) && ls.length > 1; round++) {
+      const c = cleanThinLayers(ls, dMin + 1e-6);
+      if (!c.removed) break;
+      const r = silentRefine(c.layers, lmFinal); const cand = dropZeroLayers(r.layers, startMat);
+      if (!(r.F < F0 * (1 - eps)) || !withinLimits(cand)) break;
+      ls = cand; F0 = r.F; removed += c.removed;
+    }
+    return { layers: ls, F: F0, removed };
   };
+  /** Complete a refined design the way the run would report it: remove layers below the threshold, refine with the threshold as a bound, prune pinned layers. */
+  const completeDesign = (ls) => {
+    let removed = 0;
+    if (!isComplete(ls) && ls.length > 1) { const c = cleanThinLayers(ls, dMin); removed = c.removed; ls = dropZeroLayers(silentRefine(c.layers, lmFinal).layers, startMat); }
+    const pr = prunePinnedSilent(ls);
+    return { layers: pr.layers, removed: removed + pr.removed };
+  };
+  /** The same for the current design, with events for the interface. */
+  function* prunePinned() {
+    for (let round = 0; round < 8 && pinned(layers) && layers.length > 1; round++) {
+      const c = cleanThinLayers(layers, dMin + 1e-6);
+      if (!c.removed) break;
+      const r = silentRefine(c.layers, lmFinal); const cand = dropZeroLayers(r.layers, startMat);
+      if (!(r.F < F * (1 - eps)) || !withinLimits(cand)) break;
+      stats.cleanups += c.removed;
+      yield { type: 'cleanup', removed: c.removed, layers: copy(c.layers), R: evalR(c.layers), F: evalF(c.layers), before: copy(layers), final: true, pinned: true };
+      yield { type: 'refined', layers: copy(cand), R: r.R, F: r.F, iterations: r.iterations, reason: r.reason };
+      layers = cand; F = r.F; keepBest(layers, F);
+    }
+  }
   /**
    * Thin‑layer cleanup followed by refinement, repeated while the refinement leaves a layer below the
    * threshold (at most four rounds); returns the number of removed layers (0 when nothing to clean).
@@ -191,9 +220,10 @@ export function* synthesize(cfg) {
       stats.cleanups += removed; total += removed;
       keepBest(cl, evalF(cl));
       yield { type: 'cleanup', removed, layers: copy(cl), R: evalR(cl), F: evalF(cl), before: copy(layers), final: !!final };
-      const r3 = yield* doRefine(cl, label);
+      const r3 = yield* doRefine(cl, label, final ? lmFinal : lmOpts);
       layers = dropZeroLayers(r3.layers, startMat); F = r3.F; keepBest(layers, F);
     }
+    if (final) yield* prunePinned();
     return total;
   }
 
@@ -279,12 +309,12 @@ export function* synthesize(cfg) {
       const r2 = yield* doRefine(t.trial, 'Refinement after needle');
       let cleaned = dropZeroLayers(r2.layers, startMat);
       if (phase === 'final' && !isComplete(cleaned) && cleaned.length > 1) {
-        // the final phase accepts only complete designs: thin layers are removed and the design refined before the comparison
+        // the final phase accepts only complete designs: thin layers are removed and the design refined (bounded) before the comparison
         const c = cleanThinLayers(cleaned, dMin); stats.cleanups += c.removed;
         keepBest(c.layers, evalF(c.layers));
         yield { type: 'cleanup', removed: c.removed, layers: copy(c.layers), R: evalR(c.layers), F: evalF(c.layers), before: copy(cleaned), final: true };
-        const r3 = yield* doRefine(c.layers, 'Refinement after cleanup');
-        cleaned = dropZeroLayers(r3.layers, startMat);
+        const r3 = yield* doRefine(c.layers, 'Refinement after cleanup', lmFinal);
+        cleaned = prunePinnedSilent(dropZeroLayers(r3.layers, startMat)).layers;
       }
       const Fc = evalF(cleaned);
       if (Fc < F * (1 - eps) && cleaned.length <= maxLayers) { layers = cleaned; F = Fc; keepBest(layers, F); if (phase === 'final') stats.finalNeedles++; }
@@ -365,7 +395,7 @@ export function* synthesize(cfg) {
   yield { type: 'stage', stage: 'final' };
   let fromArchive = null, finalCleanupRemoved = 0;
   finalCleanupRemoved = yield* cleanupAndRefine('Final refinement', true);
-  if (!finalCleanupRemoved) { const r5 = yield* doRefine(layers, 'Final refinement'); layers = dropZeroLayers(r5.layers, startMat); F = r5.F; keepBest(layers, F); }
+  if (!finalCleanupRemoved) { const r5 = yield* doRefine(layers, 'Final refinement', lmFinal); layers = dropZeroLayers(r5.layers, startMat); F = r5.F; keepBest(layers, F); yield* prunePinned(); }
   const completedTerminal = { F, layers: layers.length };
   /**
    * Adopt the best archived design when its merit is lower than the current one. Archive entries may
@@ -376,17 +406,11 @@ export function* synthesize(cfg) {
     if (!(best && best.F < F)) return false;
     fromArchive = { cycle: best.cycle, F: best.F };
     layers = copy(best.layers); F = best.F;
-    const r = yield* doRefine(layers, 'Final refinement');
+    // archive entries may predate a refinement: refine once more with the threshold as a bound (stays complete)
+    const r = yield* doRefine(layers, 'Final refinement', lmFinal);
     const rl = dropZeroLayers(r.layers, startMat);
-    if (isComplete(rl)) { if (r.F < F) { layers = rl; F = r.F; keepBest(layers, F); } }
-    else if (rl.length > 1) {
-      const c = cleanThinLayers(rl, dMin); stats.cleanups += c.removed;
-      keepBest(c.layers, evalF(c.layers));
-      yield { type: 'cleanup', removed: c.removed, layers: copy(c.layers), R: evalR(c.layers), F: evalF(c.layers), before: copy(rl), final: true };
-      const r2 = yield* doRefine(c.layers, 'Refinement after cleanup');
-      const l2 = dropZeroLayers(r2.layers, startMat);
-      if (isComplete(l2)) { keepBest(l2, r2.F); if (r2.F < F) { layers = l2; F = r2.F; } }
-    }
+    if (r.F < F && withinLimits(rl)) { layers = rl; F = r.F; keepBest(layers, F); }
+    yield* prunePinned();
     fromArchive.F = F;
     return true;
   }
@@ -414,6 +438,8 @@ export function* synthesize(cfg) {
     yield* adoptArchive();
     if (exploitStop && exploitStop !== 'steps' && exploitStop !== 'budget') { stop.needleStop = exploitStop; stop.layerLimitPartial = exploitStop === 'layer-limit' && layerLimitPartial; }
   }
+  // hard guard: whatever happened above, the reported design has no layer below the threshold
+  if (!isComplete(layers) && layers.length > 1) { yield* cleanupAndRefine('Final refinement', true); keepBest(layers, F); yield* adoptArchive(); }
   const finalGain = stats.finalNeedles > 0 && F < Fexploit0 ? { needles: stats.finalNeedles, from: Fexploit0, to: F } : null;
   const Rf = evalR(layers);
   const Ff = evalF(layers);
