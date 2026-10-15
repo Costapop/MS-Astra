@@ -1,4 +1,4 @@
-# MS Astra 2.1 — mathematical method
+# MS Astra 2.3 — mathematical method
 
 This document records the exact formulas implemented in `src/optics.js`,
 `src/refine.js` and `src/synthesis.js`. The formalism follows
@@ -11,32 +11,92 @@ A. Tikhonravov, *Optical Coatings: Design, Characterization, Monitoring*
 
 ## 1. Model and conventions
 
-* Normal incidence from air, `n_a = 1`; semi‑infinite substrate `n_s`
-  (BK7, 1.52); isotropic, homogeneous, lossless, non‑dispersive layers with
-  constant real refractive indices; all lengths in nanometres.
-* Layer `j = 1` is adjacent to the substrate and layer `j = N` faces the air
-  (2.1). The same order is used in the layer table and in the Excel export.
-* Wave number `k = 2π/λ`, phase thickness `φ_j = k n_j d_j` (2.6).
+* A plane wave is incident from a transparent medium `n_a` (air, 1.00, or
+  BK7, 1.52) at the angle `θ` (0 ≤ θ ≤ 89.9°, measured in that medium) onto
+  a semi‑infinite substrate `n_s` (BK7, 1.52) coated with isotropic,
+  homogeneous, lossless, non‑dispersive layers with constant real refractive
+  indices; all lengths in nanometres.
+* Layer `j = 1` is adjacent to the substrate and layer `j = N` faces the
+  incident medium (2.1). The same order is used in the layer table and in
+  the Excel export.
+* Wave number `k = 2π/λ`. Oblique incidence is described by the tangential
+  parameter `α = n_a sin θ`, the same in every medium (Snell's law, book eq.
+  1.1.10–1.1.11), the normal component `β_j = √(n_j² − α²) = n_j cos γ_j`
+  (book eq. 1.2.3; imaginary in an evanescent layer, `α > n_j`), the phase
+  thickness `φ_j = k β_j d_j` (book 1.2.7; spec 2.6) and the **polarization
+  admittances** (book Table 1.1; spec 2.6)
+
+  ```
+  s:  q_j = β_j = n_j cos γ_j          p:  q_j = n_j² / β_j = n_j / cos γ_j
+  ```
+
+  for the layers, the substrate `q_s` and the incident medium `q_a`. At
+  normal incidence `α = 0`, `β_j = n_j`, `q_j = n_j` for both polarizations and
+  everything below reduces to the book's normal‑incidence formulas.
+* Branch of the square root: `Re β ≥ 0, Im β ≤ 0` (spec 2.4) — a decaying
+  transmitted wave. For a finite layer the sign is immaterial (the layer
+  matrix is even in `β_j`); the substrate branch decides the direction of
+  decay when `α > n_s` (total internal reflection at the substrate, `R ≡ 1`,
+  which the interface rejects as a task).
 
 ## 2. Forward problem — admittance recursion
 
-With `A(0, λ) = n_s`, the admittance at the top of layer `j` is (5.1–5.2)
+With `A(0, λ) = q_s`, the admittance at the top of layer `j` is
+(5.1–5.2, generalized in 6.10–6.11 by `n_j → q_j`, `k n_j x → k β_j x`)
 
 ```
-c_j(x)  = cos(k n_j x) + i (A_{j−1}/n_j) sin(k n_j x)
-A_j     = ( i n_j sin φ_j + A_{j−1} cos φ_j ) / c_j(d_j)
+c_j(x)  = cos(k β_j x) + i (A_{j−1}/q_j) sin(k β_j x)
+A_j     = ( i q_j sin φ_j + A_{j−1} cos φ_j ) / c_j(d_j)
 ```
 
-and the amplitude and energy reflectance are (4.2, 2.11)
+and the amplitude and energy reflectance are (4.2, 2.10–2.11; book 1.2.19)
 
 ```
-r = (n_a − A_N) / (n_a + A_N),      R = |r|².
+r = (q_a − A_N) / (q_a + A_N),      R = |r|².
 ```
+
+An evanescent layer has `φ_j = i t`, `q_j = i Q_j` with real `t = k|β_j|d_j`
+and `Q_j`; then `cos φ = cosh t`, `sin φ = i sinh t`, and the same real
+formulas hold with the sign of the `q_j sin φ_j` term reversed — the code
+stays in real (re, im) arithmetic. Both polarizations are evaluated with
+their own `q` tables; at normal incidence only one is computed.
 
 The recursion is exact for homogeneous layers; no spatial integration is
 needed. `tests/optics.test.js` compares it with an independent 2×2
-characteristic‑matrix implementation on random stacks (agreement 1e‑12) and
-with closed‑form cases (bare substrate, quarter‑wave layer, (HL)⁵H stack).
+characteristic‑matrix implementation (book eq. 1.2.9–1.2.14 with complex
+`q_j`, `φ_j`) on random stacks at normal incidence and at 15–89.9° from air
+and 30–89° from BK7, including evanescent MgF₂/SiO₂ layers (agreement
+1e‑11, and `R + T = 1` for the lossless reference), with the Fresnel
+formulas for a bare substrate at oblique incidence (book 1.1.3), the
+Brewster angle (`R_p = 0` at `tan θ = n_s/n_a`) and closed‑form cases at
+normal incidence (bare substrate, quarter‑wave layer, (HL)⁵H stack).
+
+### 2a. Target characteristic (v2.3)
+
+The target bands apply to one of (book 1.1.24–1.1.25; spec 3.4):
+
+| characteristic | merit | use |
+|---|---|---|
+| `Rs` | `Σ ν_l (Rs_l − R̃_l)²` | s‑polarized light |
+| `Rp` | `Σ ν_l (Rp_l − R̃_l)²` | p‑polarized light |
+| `Rs & Rp` | `½ [Σ ν_s,l (Rs_l − R̃s_l)² + Σ ν_p,l (Rp_l − R̃p_l)²]` | the two polarizations, each to **its own target** `R̃s`, `R̃p` (polarizer, polarization‑insensitive splitter, …) |
+| `(Rs + Rp)/2` | `Σ ν_l (R̄_l − R̃_l)²`, `R̄ = (Rs + Rp)/2` | unpolarized light |
+
+For `Rs & Rp` the Rs target and the Rp target are two independent
+piecewise‑constant band sets on the shared spectral range, each sampled on
+the same grid with its own transition zones and its own weights normalised
+to one, so `F = ½(F_s + F_p)`; the least‑squares problem has `2L` residual
+rows (one per wavelength and polarization, each `√(ν_P,l/2)(R_P,l − R̃_P,l)`).
+The dense verification grid carries both sides of every jump of either
+target, the enrichment takes the larger of the two errors at a dense point,
+and the needle derivative sums the adjoint functions of the two
+polarizations, each built from its own residual (§4). For the unpolarized
+mean the residual is formed from the physical quantity `R̄` first and
+differentiated afterwards (`δR̄ = ½(δRs + δRp)`), as the specification
+requires. The chart draws the characteristic as the main curve and the
+polarizations as thin lines (in the `Rs & Rp` mode both targets — Rp dashed —
+and both spectra are drawn and edited); the dense‑grid check and the export
+use the same definitions.
 
 ## 3. Merit function
 
@@ -57,33 +117,62 @@ points are still displayed and exported.
 
 ## 4. Adjoint function and analytic derivatives
 
-Terminal condition of the conjugate function (4.9) and backward recursion (5.3):
+Inside every medium the admittance obeys `A' = i k (b_j − a_j A²)` with the
+generator coefficients (spec 6.1–6.3)
 
 ```
-Ψ_N = (2ν_l / n_a) (R_l − R̃_l) r* (1 + r)²,       Ψ_{j−1} = Ψ_j / c_j(d_j)²
+s:  a_j = 1,            b_j = n_j² − α²
+p:  a_j = 1 − α²/n_j²,  b_j = n_j²
 ```
 
-Inside a layer (5.4): `Ψ(z_{j−1}+x) = Ψ_j [c_j(x)/c_j(d_j)]²`. The product
-`Ψ·δA` is constant above a perturbation (4.11), which yields:
+(both `a = 1`, `b = n²` at normal incidence). Terminal condition of the
+conjugate function per polarization (4.9, generalized in 6.5) and backward
+recursion (5.3):
 
-* **Thickness derivatives** (6.13 with `a = 1`, `b = n²`):
-  `∂F/∂d_j = Σ_l k_l Im{ Ψ_l(z_j) (n_j² − A_l(z_j)²) }`.
+```
+Ψ_N = (2 ν_l w_P / q_a) e_l r* (1 + r)²,       Ψ_{j−1} = Ψ_j / c_j(d_j)²
+```
+
+where `e_l` is the residual of the characteristic (`R_P − R̃` for a single
+polarization, `R_P − R̃_P` with the polarization's own target and weights
+`ν_P,l` for `Rs & Rp`, `R̄ − R̃` for the unpolarized mean) and `w_P = 1` for a
+single polarization, `½` when both enter. Inside a layer
+(5.4, 6.12): `Ψ(z_{j−1}+x) = Ψ_j [c_j(x)/c_j(d_j)]²`. The product `Ψ·δA` is
+constant above a perturbation (4.11, 6.14), which yields:
+
+* **Thickness derivatives** (6.13):
+  `∂F/∂d_j = Σ_P Σ_l k_l Im{ Ψ_{P,l}(z_j) (b_j − a_j A_{P,l}(z_j)²) }`.
 * **Per‑wavelength Jacobian** used by Levenberg–Marquardt, obtained from the
   same recursion with `Φ_N = 1`, `Φ_{j−1} = Φ_j / c_j²`:
-  `∂R_l/∂d_j = (k_l/n_a) Im{ r* (1+r)² Φ_j (n_j² − A_j²) }`.
-* **Needle derivative** (4.12–4.14): with `P(z) = Σ_l k_l Im Ψ_l(z)`, the
-  derivative of `F` with respect to the width of an infinitely thin layer of
-  material `m` inserted at `z` inside host material `h` is
-  `g_m(z) = P(z) (n_m² − n_h²)`.
+  `∂R_P,l/∂d_j = (k_l/q_a) Im{ r* (1+r)² Φ_j (b_j − a_j A_j²) }`; the Jacobian
+  of the characteristic combines the polarizations with the weights `w_P`.
+* **Needle derivative** (4.12–4.14, generalized in 6.6): the derivative of
+  `F` with respect to the width of an infinitely thin layer of material `m`
+  inserted at `z` inside host material `h` is
 
-All derivatives are analytic. `tests/optics.test.js` checks the gradient and
-the Jacobian against central finite differences (relative error < 1e‑8) and
-the needle derivative against the finite‑width merit change (η = 0.001 nm).
+  ```
+  g_m(z) = Σ_P Σ_l k_l Im{ Ψ_{P,l}(z) [Δb − Δa A_{P,l}(z)²] },   Δa = a_m − a_h,  Δb = b_m − b_h.
+  ```
+
+  For s‑polarization `Δa = 0` and `Δb = n_m² − n_h²`, so the book's form
+  `g = P(z)(n_m² − n_h²)` with `P(z) = Σ_l k_l Im Ψ_l(z)` is recovered; for
+  p‑polarization `Δa = α²(n_m² − n_h²)/(n_m² n_h²)` and the derivative
+  depends on the local admittance `A(z)` (spec 6.8–6.9) — the sign of `P(z)`
+  alone no longer decides.
+
+All derivatives are analytic. `tests/optics.test.js` checks the gradient,
+the Jacobian and the weighted residual rows against central finite
+differences at normal incidence (relative error < 1e‑8) and at 30–72° from
+air and BK7 for `Rs`, `Rp`, `Rs & Rp` (shared and separate targets with
+different weights) and the unpolarized mean (< 1e‑7), and
+the needle derivative against the finite‑width merit change (η = 0.001 nm at
+normal incidence, 0.0005 nm at oblique incidence, including an evanescent
+host layer).
 
 ## 5. Thickness refinement — constrained Levenberg–Marquardt
 
-Residuals `e_l = √ν_l (R_l − R̃_l)` and Jacobian `J_lj = √ν_l ∂R_l/∂d_j` give
-the normal equations (8.10)
+Residuals `e_l = √ν_l (R_l − R̃_l)` and Jacobian `J_lj = √ν_l ∂R_l/∂d_j`
+(for `Rs & Rp`: `2L` rows with `√(ν_l/2)`) give the normal equations (8.10)
 
 ```
 (JᵀJ + μ·diag(JᵀJ)) Δd = −Jᵀe
@@ -102,7 +191,8 @@ vanishing projected gradient, or no admissible descent step.
 1. After refinement, `g(z)` is evaluated on a grid with
    `k_max n Δz ≤ π/16` (9.1) and at least 41 points per layer, for the
    opposite material in every layer, plus the two one‑sided boundary
-   candidates (a new layer at the substrate and at the air side, §9.1).
+   candidates (a new layer at the substrate and at the incident‑medium side,
+   §9.1).
 2. Negative local minima are refined by golden‑section search and sorted by
    `g`; values below `10⁻⁶·max|g|` are treated as numerical zero.
 3. For the `K_cand` most negative candidates (default 3; 0 = all admissible
@@ -164,6 +254,8 @@ from a 150 nm L start and 6·10⁻¹³ from a 200 nm H start on the same
 problem). In multi‑start mode the manual single layer, single L and H layers
 of 1, 2, 4 and 8 quarter‑waves at the band centre, and a quarter‑wave stack
 (HL)ᴺH at the band centre within the limits are synthesized to completion
+(at oblique incidence a quarter wave is `λ_c / (4 n_j cos γ_j)`, so the
+stack is tuned to the angle)
 in a background worker with a time budget per start; the designs are ranked
 by `max(F, F_dense)` and the winner's evolution is replayed on the dashboard
 (the synthesis is deterministic, so the replay reproduces the result).

@@ -107,19 +107,40 @@ export function buildWorkbook(sheets) {
 }
 
 /** Build the MS Astra result workbook. */
-export function resultWorkbook({ settings, wavelengths, target, weights, R, layers, result, starts = [] }) {
-  const spectrum = {
-    name: 'Spectrum', title: 'Target and synthesized reflectance on the optimization grid',
+const polT = (t, key) => (t && !t.length ? t[key] : t);
+export function resultWorkbook({ settings, wavelengths, target, weights, R, Rs = null, Rp = null, layers, result, starts = [] }) {
+  const oblique = (settings.angle ?? 0) > 0;
+  const dual = oblique && settings.pol === 'both' && target && !target.length && Rs && Rp;   // separate Rs and Rp targets
+  const charName = oblique ? (settings.pol === 'both' ? '(Rs+Rp)/2' : settings.polLabel || 'R') : 'R';
+  const pols = oblique && Rs && Rp;
+  const tS = polT(target, 's'), tP = polT(target, 'p'), wS = polT(weights, 's'), wP = polT(weights, 'p');
+  const spectrum = dual ? {
+    name: 'Spectrum', title: `Targets and synthesized Rs, Rp at ${settings.angle}° from ${settings.ambient ? settings.ambient.label : 'air'} (Rs & Rp: each polarization to its own target) on the optimization grid`,
+    columns: [
+      { title: 'Wavelength, nm', width: 16, style: 3 },
+      { title: 'Target Rs', width: 12, style: 4 },
+      { title: 'Target Rp', width: 12, style: 4 },
+      { title: 'Synthesized Rs', width: 15, style: 4 },
+      { title: 'Synthesized Rp', width: 15, style: 4 },
+      { title: 'ΔRs, p.p.', width: 12, style: 3 },
+      { title: 'ΔRp, p.p.', width: 12, style: 3 },
+      { title: 'Weight Rs', width: 12, style: 4 },
+      { title: 'Weight Rp', width: 12, style: 4 },
+    ],
+    rows: Array.from(wavelengths, (w, i) => [w, tS[i], tP[i], Rs[i], Rp[i], 100 * (Rs[i] - tS[i]), 100 * (Rp[i] - tP[i]), wS ? wS[i] : 1 / wavelengths.length, wP ? wP[i] : 1 / wavelengths.length]),
+  } : {
+    name: 'Spectrum', title: `Target and synthesized ${oblique ? `reflectance at ${settings.angle}° from ${settings.ambient ? settings.ambient.label : 'air'} (target characteristic ${settings.polLabel || charName})` : 'reflectance'} on the optimization grid`,
     columns: [
       { title: 'Wavelength, nm', width: 16, style: 3 },
       { title: 'Target R', width: 12, style: 4 },
       { title: 'Target R, %', width: 12, style: 3 },
-      { title: 'Synthesized R', width: 14, style: 4 },
-      { title: 'Synthesized R, %', width: 16, style: 3 },
+      { title: `Synthesized ${charName}`, width: 14, style: 4 },
+      { title: `Synthesized ${charName}, %`, width: 16, style: 3 },
       { title: 'Difference, p.p.', width: 16, style: 3 },
       { title: 'Merit weight', width: 13, style: 4 },
+      ...(pols ? [{ title: 'Rs', width: 12, style: 4 }, { title: 'Rp', width: 12, style: 4 }] : []),
     ],
-    rows: Array.from(wavelengths, (w, i) => [w, target[i], 100 * target[i], R[i], 100 * R[i], 100 * (R[i] - target[i]), weights ? weights[i] : 1 / wavelengths.length]),
+    rows: Array.from(wavelengths, (w, i) => [w, tS[i], 100 * tS[i], R[i], 100 * R[i], 100 * (R[i] - tS[i]), wS ? wS[i] : 1 / wavelengths.length, ...(pols ? [Rs[i], Rp[i]] : [])]),
   };
   let z = 0;
   const design = {
@@ -143,20 +164,23 @@ export function resultWorkbook({ settings, wavelengths, target, weights, R, laye
     rows: [
       ['Application', 'MS Astra ' + settings.version],
       ['Method', 'Needle optimization + gradual evolution (Furman–Tikhonravov admittance formalism)'],
-      ['Incidence', 'Normal, from air (n = 1)'],
+      ['Incidence', oblique ? `${settings.angle}° from ${settings.ambient ? `${settings.ambient.label} (n = ${settings.ambient.n})` : 'air (n = 1)'}; α = n_a sin θ = ${((settings.ambient ? settings.ambient.n : 1) * Math.sin(settings.angle * Math.PI / 180)).toFixed(4)}` : `Normal, from ${settings.ambient ? `${settings.ambient.label} (n = ${settings.ambient.n})` : 'air (n = 1)'}`],
+      ['Target characteristic', oblique ? `${settings.polLabel || charName}${settings.pol === 'avg' ? ' — unpolarized light' : settings.pol === 'both' ? ' — Rs and Rp each to its own target, F = ½[⟨(Rs − R̃s)²⟩ + ⟨(Rp − R̃p)²⟩]' : ''}` : 'R (Rs = Rp at normal incidence)'],
       ['Substrate', `${settings.substrate.label} (n = ${settings.substrate.n}), semi‑infinite`],
       ['High‑index material (H)', `${settings.H.key} (n = ${settings.H.n})`],
       ['Low‑index material (L)', `${settings.L.key} (n = ${settings.L.n})`],
       ['Spectral range, nm', `${settings.lambdaMin} – ${settings.lambdaMax}`],
       ['Spectral points', settings.points],
-      ['Target bands', settings.bands.map((b) => `${b.from.toFixed(1)}–${b.to.toFixed(1)} nm: R = ${(100 * b.R).toFixed(2)} %`).join('; ')],
+      ['Target bands', settings.dual && settings.bands2
+        ? `Rs: ${settings.bands.map((b) => `${b.from.toFixed(1)}–${b.to.toFixed(1)} nm ${(100 * b.R).toFixed(2)} %`).join('; ')} | Rp: ${settings.bands2.map((b) => `${b.from.toFixed(1)}–${b.to.toFixed(1)} nm ${(100 * b.R).toFixed(2)} %`).join('; ')}`
+        : settings.bands.map((b) => `${b.from.toFixed(1)}–${b.to.toFixed(1)} nm: R = ${(100 * b.R).toFixed(2)} %`).join('; ')],
       ['Starting design', settings.startMode === 'multi' ? `Multi‑start; best: ${settings.startName || '—'}` : `${settings.startMaterial.key}, ${settings.startThickness} nm`],
       ['Transition zone at target jumps, nm', settings.transition ?? 0],
       ['Needle candidates compared per step', settings.candidates === 0 ? 'all' : settings.candidates],
       ['Dense‑grid check / grid enrichment', `${settings.denseCheck ? 'on' : 'off'} / ${settings.denseCheck && settings.enrichGrid ? 'on' : 'off'}`],
       ['Maximum layers', settings.maxLayers],
       ['Maximum total optical thickness, nm', settings.maxTOT],
-      ['Target merit function F (mean square of R − R̃)', settings.targetMerit],
+      [dual ? 'Target merit function F = ½[⟨(Rs − R̃s)²⟩ + ⟨(Rp − R̃p)²⟩]' : `Target merit function F (mean square of ${charName} − R̃)`, settings.targetMerit],
       ['Thin‑layer threshold, nm', settings.thinLayer],
       [],
       ['Result: layers', layers.length],
@@ -188,16 +212,29 @@ export function resultWorkbook({ settings, wavelengths, target, weights, R, laye
   };
   const sheets = [spectrum, design, summary];
   if (result.dense) {
-    sheets.push({
-      name: 'Verification', title: `Independent dense‑grid check (${result.dense.wavelengths.length} points; zero weight inside transition zones and one grid step around jumps)`,
+    const d = result.dense, dtS = polT(d.target, 's'), dtP = polT(d.target, 'p'), dwS = polT(d.weights, 's'), dwP = polT(d.weights, 'p');
+    const dDual = dual && d.Rs && d.Rp && d.target && !d.target.length;
+    sheets.push(dDual ? {
+      name: 'Verification', title: `Independent dense‑grid check (${d.wavelengths.length} points; zero weight inside transition zones and one grid step around jumps) — Rs and Rp against their own targets`,
+      columns: [
+        { title: 'Wavelength, nm', width: 16, style: 3 },
+        { title: 'Target Rs', width: 12, style: 4 }, { title: 'Target Rp', width: 12, style: 4 },
+        { title: 'Synthesized Rs', width: 15, style: 4 }, { title: 'Synthesized Rp', width: 15, style: 4 },
+        { title: 'ΔRs, p.p.', width: 12, style: 3 }, { title: 'ΔRp, p.p.', width: 12, style: 3 },
+        { title: 'Counted Rs', width: 11 }, { title: 'Counted Rp', width: 11 },
+      ],
+      rows: Array.from(d.wavelengths, (w, i) => [w, dtS[i], dtP[i], d.Rs[i], d.Rp[i], 100 * (d.Rs[i] - dtS[i]), 100 * (d.Rp[i] - dtP[i]), dwS[i] > 0 ? 'yes' : 'no', dwP[i] > 0 ? 'yes' : 'no']),
+    } : {
+      name: 'Verification', title: `Independent dense‑grid check (${d.wavelengths.length} points; zero weight inside transition zones and one grid step around jumps)`,
       columns: [
         { title: 'Wavelength, nm', width: 16, style: 3 },
         { title: 'Target R', width: 12, style: 4 },
-        { title: 'Synthesized R', width: 14, style: 4 },
+        { title: `Synthesized ${charName}`, width: 14, style: 4 },
         { title: 'Difference, p.p.', width: 16, style: 3 },
         { title: 'Counted', width: 10 },
+        ...(oblique && d.Rs && d.Rp ? [{ title: 'Rs', width: 12, style: 4 }, { title: 'Rp', width: 12, style: 4 }] : []),
       ],
-      rows: Array.from(result.dense.wavelengths, (w, i) => [w, result.dense.target[i], result.dense.R[i], 100 * (result.dense.R[i] - result.dense.target[i]), result.dense.weights[i] > 0 ? 'yes' : 'no']),
+      rows: Array.from(d.wavelengths, (w, i) => [w, dtS[i], d.R[i], 100 * (d.R[i] - dtS[i]), dwS[i] > 0 ? 'yes' : 'no', ...(oblique && d.Rs && d.Rp ? [d.Rs[i], d.Rp[i]] : [])]),
     });
   }
   if (starts && starts.length) {

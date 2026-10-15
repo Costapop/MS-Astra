@@ -12,8 +12,12 @@ dependencies, accounts or backend.
 
 ## Method in one paragraph
 
-Normal incidence from air onto isotropic, homogeneous, lossless,
-non‑dispersive layers on a semi‑infinite substrate. The synthesis starts from a
+A plane wave from air or BK7 at any angle of incidence from 0 to 89.9° onto
+isotropic, homogeneous, lossless, non‑dispersive layers on a semi‑infinite
+substrate; the target applies to `Rs`, `Rp`, to `Rs` and `Rp` jointly with a
+separate target for each polarization, or to the unpolarized reflectance
+`(Rs + Rp)/2` (s and p are handled with the Furman–Tikhonravov polarization
+admittances, evanescent layers included). The synthesis starts from a
 single layer (or from a set of starting designs explored in the background),
 refines all thicknesses with a constrained Levenberg–Marquardt method using
 the analytic Jacobian, computes the needle derivative `g(z)` analytically
@@ -37,8 +41,17 @@ evidence: [docs/VERIFICATION.md](docs/VERIFICATION.md).
    it, double‑click a boundary to merge. The *Target* tab holds the same
    values numerically together with the spectral range, the number of points
    and the transition zone around target jumps (points inside it get zero
-   weight).
-2. In the sidebar set the H and L materials, the substrate, the starting
+   weight). The **angle of incidence** (0–89.9°) and the **target
+   characteristic** — `Rs`, `Rp`, `Rs & Rp` (a separate target for each
+   polarization: the Rp target is the dashed line on the chart and the
+   second table on the tab) or `(Rs + Rp)/2` (unpolarized light) — are set
+   in the header of the same card and on its *Target* tab; the target bands
+   are drawn and typed the same way at any angle. At an oblique angle the
+   chart adds thin lines for `Rs` (solid) and `Rp` (dashed) and the tooltip
+   shows both.
+2. In the sidebar set the H and L materials, the substrate, the **incident
+   medium** the light comes from (air or BK7 — e.g. a cemented cube, with the
+   angle measured inside it), the starting
    design (a single layer, or **Multi‑start**: ten starting designs are
    synthesized in the background and watched on the charts, then the best is
    replayed) and the limits: maximum number of layers, maximum total optical
@@ -64,8 +77,12 @@ evidence: [docs/VERIFICATION.md](docs/VERIFICATION.md).
 
 Materials (constant indices): MgF₂ 1.38, SiO₂ 1.46, Al₂O₃ 1.63, HfO₂ 1.95,
 Ta₂O₅ 2.10, TiO₂ 2.45, ZnS 2.35, a‑Si 3.95, K8 1.52, fused quartz 1.46,
-Sitall 1.54. Substrate: BK7 1.52. Wavelengths and thicknesses in nm. Layer 1
-is adjacent to the substrate everywhere in the application and in the export.
+Sitall 1.54. Substrate: BK7 1.52. Incident medium: air 1.00 or BK7 1.52.
+Wavelengths and thicknesses in nm. Layer 1 is adjacent to the substrate
+everywhere in the application and in the export. Presets *Cube splitter 45°*
+(unpolarized 50 % inside BK7), *AR at 45°* (both polarizations) and
+*Polarizer 45°* (Rs → 98 %, Rp → 0 inside BK7) show the oblique‑incidence
+modes.
 
 ## Run locally
 
@@ -81,15 +98,15 @@ Serve the files over HTTP (the application uses JavaScript modules).
 
 ## Repository
 
-- `src/optics.js` — admittance recursion, adjoint function, analytic Jacobian and needle derivative, needle insertion, thin‑layer cleanup.
+- `src/optics.js` — optical model (incident medium, angle, polarization characteristic), admittance recursion with polarization admittances, adjoint function, analytic Jacobian and needle derivative, needle insertion, thin‑layer cleanup.
 - `src/refine.js` — constrained Levenberg–Marquardt refinement (generator, yields frames).
 - `src/synthesis.js` — needle cycle with candidate comparison, gradual evolution, cleanup, dense‑grid check and enrichment, multi‑start exploration; emits events for the interface.
 - `src/worker.js` — background multi‑start exploration.
 - `src/charts.js` — canvas charts: interactive target editor, needle derivative, coating structure, merit history.
 - `src/app.js` — settings, runner with demonstration pacing and animation, export.
 - `src/xlsx.js` — dependency‑free Excel writer.
-- `tests/` — verification against closed forms, an independent matrix code, finite differences, the specification's worked example and the book's designs.
+- `tests/` — verification against closed forms (Fresnel, Brewster, quarter‑wave stacks), an independent complex Abelès‑matrix code at normal and oblique incidence, finite differences, the specification's worked example and the book's designs.
 
-Release notes: [docs/RELEASE-v2.2.2.md](docs/RELEASE-v2.2.2.md), [v2.2.1](docs/RELEASE-v2.2.1.md), [v2.2.0](docs/RELEASE-v2.2.0.md), [v2.1.3](docs/RELEASE-v2.1.3.md), [v2.1.1](docs/RELEASE-v2.1.1.md), [v2.1.0](docs/RELEASE-v2.1.0.md), [v2.0.0](docs/RELEASE-v2.0.0.md). The source
+Release notes: [docs/RELEASE-v2.3.0.md](docs/RELEASE-v2.3.0.md), [v2.2.2](docs/RELEASE-v2.2.2.md), [v2.2.1](docs/RELEASE-v2.2.1.md), [v2.2.0](docs/RELEASE-v2.2.0.md), [v2.1.3](docs/RELEASE-v2.1.3.md), [v2.1.1](docs/RELEASE-v2.1.1.md), [v2.1.0](docs/RELEASE-v2.1.0.md), [v2.0.0](docs/RELEASE-v2.0.0.md). The source
 books and the private method specification are not distributed with this
 repository.

@@ -84,7 +84,8 @@ export class SpectrumChart extends Plot {
   constructor(canvas, tooltip) {
     super(canvas, { l: 66, r: 18, t: 26, b: 34 });
     this.tooltip = tooltip;
-    this.state = { lambdaMin: 400, lambdaMax: 700, bands: [], grid: null, target: null, R: null, weights: null, added: null, curve: null, curveDashed: false, transition: 0, yMode: 'full', editable: true, ghosts: [], ghostHighlight: null };
+    // bands: the target (Rs target in the «Rs & Rp» mode); bands2: the Rp target when `dual`
+    this.state = { lambdaMin: 400, lambdaMax: 700, bands: [], bands2: null, dual: false, grid: null, target: null, R: null, weights: null, added: null, curve: null, curveDashed: false, transition: 0, yMode: 'full', editable: true, ghosts: [], ghostHighlight: null, showPols: false, showRs: true, showRp: true, charLabel: 'R' };
     this.onChange = null;      // (patch) => void
     this.hover = null; this.drag = null;
     const c = canvas;
@@ -96,6 +97,10 @@ export class SpectrumChart extends Plot {
     c.addEventListener('dblclick', (e) => this.onDouble(e));
   }
   set(patch) { Object.assign(this.state, patch); this.requestDraw(); }
+  /** The band sets in play: [Rs‑or‑single, Rp] in the dual mode, [single] otherwise. */
+  sets() { const s = this.state; return s.dual && s.bands2 ? [s.bands, s.bands2] : [s.bands]; }
+  targetOf(key) { const t = this.state.target; return t && !t.length ? t[key] : t; }
+  weightsOf(key) { const w = this.state.weights; return w && !w.length ? w[key] : w; }
   scales() {
     const s = this.state, fr = this.frame();
     const span = s.lambdaMax - s.lambdaMin;
@@ -105,8 +110,9 @@ export class SpectrumChart extends Plot {
     if (s.yMode === 'fit') {
       let lo = Infinity, hi = -Infinity;
       const scan = (arr) => { if (arr) for (let i = 0; i < arr.length; i++) { lo = Math.min(lo, arr[i]); hi = Math.max(hi, arr[i]); } };
-      scan(s.target); scan(s.R); if (s.curve) scan(s.curve.R);
-      for (const gh of s.ghosts || []) scan(gh.R);
+      scan(this.targetOf('s')); if (s.dual) scan(this.targetOf('p'));
+      if (s.dual && s.curve) { scan(s.curve.Rs); scan(s.curve.Rp); } else { scan(s.R); if (s.curve) scan(s.curve.R); }
+      for (const gh of s.ghosts || []) { scan(gh.R); scan(gh.R2); }
       if (!Number.isFinite(lo)) { lo = 0; hi = 1; }
       const p = Math.max((hi - lo) * 0.15, 0.005);
       y0 = Math.max(0, lo - p); y1 = Math.min(1, hi + p);
@@ -118,12 +124,14 @@ export class SpectrumChart extends Plot {
   handles() {
     const { xs, ys, fr } = this.scales();
     const s = this.state, out = [];
-    s.bands.forEach((b, i) => {
-      out.push({ type: 'level', index: i, x: xs((b.from + b.to) / 2), y: ys(b.R) });
-      if (i < s.bands.length - 1) out.push({ type: 'boundary', index: i, x: xs(b.to), y: fr.y0 + 8 });
+    this.sets().forEach((bands, set) => {
+      bands.forEach((b, i) => {
+        out.push({ type: 'level', set, index: i, x: xs((b.from + b.to) / 2), y: ys(b.R) });
+        if (i < bands.length - 1) out.push({ type: 'boundary', set, index: i, x: xs(b.to), y: fr.y0 + 8 + 12 * set });
+      });
     });
-    out.push({ type: 'range-min', x: xs(s.lambdaMin), y: fr.y0 + 8 });
-    out.push({ type: 'range-max', x: xs(s.lambdaMax), y: fr.y0 + 8 });
+    out.push({ type: 'range-min', set: 0, x: xs(s.lambdaMin), y: fr.y0 + 8 });
+    out.push({ type: 'range-max', set: 0, x: xs(s.lambdaMax), y: fr.y0 + 8 });
     return out;
   }
   pick(px, py) {
@@ -147,11 +155,24 @@ export class SpectrumChart extends Plot {
     const lam = xs.invert(p.x);
     let i = 0, bd = Infinity;
     for (let k = 0; k < s.grid.length; k++) { const d = Math.abs(s.grid[k] - lam); if (d < bd) { bd = d; i = k; } }
-    const t = s.target ? s.target[i] : null, r = s.R ? s.R[i] : null;
     let html = `<b>λ = ${s.grid[i].toFixed(1)} nm</b>`;
-    if (t != null) html += `<br>Target ${fmt.pct(t)}`;
-    if (r != null) html += `<br>Current ${fmt.pct(r, 3)}`;
-    if (t != null && r != null) html += `<br>Error ${(100 * (r - t)).toFixed(3)} p.p.`;
+    // s and p polarizations from the dense display curve, nearest point
+    let ci = -1;
+    if (s.curve && s.curve.Rs && s.curve.Rp) { let cd = Infinity; for (let k = 0; k < s.curve.wl.length; k++) { const d = Math.abs(s.curve.wl[k] - s.grid[i]); if (d < cd) { cd = d; ci = k; } } }
+    if (s.dual) {
+      const ts = this.targetOf('s'), tp = this.targetOf('p');
+      if (ts && tp) html += `<br>Target Rs ${fmt.pct(ts[i])} · Rp ${fmt.pct(tp[i])}`;
+      if (ci >= 0) {
+        html += `<br>Current Rs ${fmt.pct(s.curve.Rs[ci], 3)} · Rp ${fmt.pct(s.curve.Rp[ci], 3)}`;
+        if (ts && tp) html += `<br>Error Rs ${(100 * (s.curve.Rs[ci] - ts[i])).toFixed(2)} · Rp ${(100 * (s.curve.Rp[ci] - tp[i])).toFixed(2)} p.p.`;
+      }
+    } else {
+      const t = this.targetOf('s') ? this.targetOf('s')[i] : null, r = s.R ? s.R[i] : null;
+      if (t != null) html += `<br>Target ${fmt.pct(t)}`;
+      if (r != null) html += `<br>Current ${s.showPols ? s.charLabel + ' ' : ''}${fmt.pct(r, 3)}`;
+      if (t != null && r != null) html += `<br>Error ${(100 * (r - t)).toFixed(3)} p.p.`;
+      if (s.showPols && ci >= 0) html += `<br>Rs ${fmt.pct(s.curve.Rs[ci], 3)} · Rp ${fmt.pct(s.curve.Rp[ci], 3)}`;
+    }
     this.tooltip.innerHTML = html; this.tooltip.hidden = false;
     const tw = this.tooltip.offsetWidth, th = this.tooltip.offsetHeight;
     let x = p.x + 14, y = p.y - th - 8;
@@ -168,52 +189,67 @@ export class SpectrumChart extends Plot {
     this.drag = h; this.dragScales = this.scales(); // freeze the axes for the duration of the drag
     this.canvas.setPointerCapture(e.pointerId); e.preventDefault();
   }
-  onUp(e) { if (this.drag) { this.drag = null; this.dragScales = null; try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* ignore */ } this.onChange?.({ bands: this.state.bands, lambdaMin: this.state.lambdaMin, lambdaMax: this.state.lambdaMax, commit: true }); } }
+  emit(bands, bands2, lambdaMin, lambdaMax, commit) { this.onChange?.({ bands, bands2, lambdaMin, lambdaMax, commit }); }
+  onUp(e) { if (this.drag) { this.drag = null; this.dragScales = null; try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* ignore */ } this.emit(this.state.bands, this.state.bands2, this.state.lambdaMin, this.state.lambdaMax, true); } }
   applyDrag(p) {
     const s = this.state, { xs, ys } = this.dragScales || this.scales();
     const h = this.drag;
-    const bands = s.bands.map((b) => ({ ...b }));
+    const sets = this.sets().map((bands) => bands.map((b) => ({ ...b })));
     let lambdaMin = s.lambdaMin, lambdaMax = s.lambdaMax;
     const minW = Math.max(1, Math.round((s.lambdaMax - s.lambdaMin) * 0.02));
     if (h.type === 'level') {
-      bands[h.index].R = Math.min(1, Math.max(0, Math.round(ys.invert(p.y) * 1000) / 1000));
+      sets[h.set][h.index].R = Math.min(1, Math.max(0, Math.round(ys.invert(p.y) * 1000) / 1000));
     } else if (h.type === 'boundary') {
+      const bands = sets[h.set];
       const lo = bands[h.index].from + minW, hi = bands[h.index + 1].to - minW;
       const v = Math.min(hi, Math.max(lo, Math.round(xs.invert(p.x))));
       bands[h.index].to = v; bands[h.index + 1].from = v;
     } else if (h.type === 'range-min') {
-      const v = Math.max(100, Math.min(bands[0].to - minW, Math.round(xs.invert(p.x))));
-      lambdaMin = v; bands[0].from = v;
+      // the range is shared by both targets: the first band of every set must keep a minimal width
+      let hi = Infinity; for (const bands of sets) hi = Math.min(hi, bands[0].to - minW);
+      const v = Math.max(100, Math.min(hi, Math.round(xs.invert(p.x))));
+      lambdaMin = v; for (const bands of sets) bands[0].from = v;
     } else if (h.type === 'range-max') {
-      const v = Math.min(20000, Math.max(bands[bands.length - 1].from + minW, Math.round(xs.invert(p.x))));
-      lambdaMax = v; bands[bands.length - 1].to = v;
+      let lo = -Infinity; for (const bands of sets) lo = Math.max(lo, bands[bands.length - 1].from + minW);
+      const v = Math.min(20000, Math.max(lo, Math.round(xs.invert(p.x))));
+      lambdaMax = v; for (const bands of sets) bands[bands.length - 1].to = v;
     }
-    this.onChange?.({ bands, lambdaMin, lambdaMax, commit: false });
+    this.emit(sets[0], sets[1] || s.bands2, lambdaMin, lambdaMax, false);
   }
   onDouble(e) {
     if (!this.state.editable) return;
-    const p = this.pos(e); const s = this.state; const { xs, fr } = this.scales();
+    const p = this.pos(e); const s = this.state; const { xs, ys, fr } = this.scales();
     const h = this.pick(p.x, p.y);
-    const bands = s.bands.map((b) => ({ ...b }));
+    const sets = this.sets().map((bands) => bands.map((b) => ({ ...b })));
     if (h && h.type === 'boundary') {
-      // merge bands h.index and h.index+1
+      // merge bands h.index and h.index+1 of that set
+      const bands = sets[h.set];
       bands[h.index].to = bands[h.index + 1].to; bands.splice(h.index + 1, 1);
-      this.onChange?.({ bands, lambdaMin: s.lambdaMin, lambdaMax: s.lambdaMax, commit: true });
+      this.emit(sets[0], sets[1] || s.bands2, s.lambdaMin, s.lambdaMax, true);
       return;
     }
     if (p.x < fr.x0 || p.x > fr.x1) return;
     const lam = Math.round(xs.invert(p.x));
+    // in the dual mode the set whose level is nearest to the pointer is split; otherwise the single set
+    let set = 0;
+    if (sets.length > 1) {
+      let bd = Infinity;
+      sets.forEach((bands, k) => { const b = bands.find((x) => lam >= x.from && lam <= x.to); if (!b) return; const d = Math.abs(ys(b.R) - p.y); if (d < bd) { bd = d; set = k; } });
+      if (bd > 18) return;
+    }
+    const bands = sets[set];
     const i = bands.findIndex((b) => lam > b.from && lam < b.to);
     if (i < 0) return;
     const minW = Math.max(1, (s.lambdaMax - s.lambdaMin) * 0.02);
     if (lam - bands[i].from < minW || bands[i].to - lam < minW) return;
     const b = bands[i];
     bands.splice(i, 1, { from: b.from, to: lam, R: b.R }, { from: lam, to: b.to, R: b.R });
-    this.onChange?.({ bands, lambdaMin: s.lambdaMin, lambdaMax: s.lambdaMax, commit: true });
+    this.emit(sets[0], sets[1] || s.bands2, s.lambdaMin, s.lambdaMax, true);
   }
   draw() {
     const ctx = this.begin(), T = theme(), s = this.state;
     const { xs, ys, fr, y0, y1 } = this.scales();
+    const sets = this.sets();
     // out-of-range shading
     ctx.fillStyle = T.control;
     ctx.globalAlpha = 0.5;
@@ -224,93 +260,134 @@ export class SpectrumChart extends Plot {
     const yt = { ticks: niceTicks(y0, y1, Math.max(3, Math.floor((fr.y1 - fr.y0) / 44))), scale: ys };
     this.axes(ctx, fr, xt, yt, (v) => fmtNum(v), (v) => `${fmtNum(100 * v, y1 - y0 < 0.1 ? 2 : 0)} %`, 'wavelength, nm', 'reflectance R');
     ctx.save(); ctx.beginPath(); ctx.rect(fr.x0, fr.y0 - 1, fr.x1 - fr.x0, fr.y1 - fr.y0 + 2); ctx.clip();
-    // transition zones around target jumps (zero weight)
-    if (s.transition > 0 && s.bands.length > 1) {
+    // transition zones around target jumps (zero weight) of every target
+    if (s.transition > 0) {
       ctx.save(); ctx.strokeStyle = T['ink-3']; ctx.globalAlpha = 0.35; ctx.lineWidth = 1;
-      for (let i = 0; i < s.bands.length - 1; i++) {
-        const xa = xs(s.bands[i].to - s.transition / 2), xb = xs(s.bands[i].to + s.transition / 2);
+      for (const bands of sets) for (let i = 0; i < bands.length - 1; i++) {
+        const xa = xs(bands[i].to - s.transition / 2), xb = xs(bands[i].to + s.transition / 2);
         ctx.save(); ctx.beginPath(); ctx.rect(xa, fr.y0, xb - xa, fr.y1 - fr.y0); ctx.clip();
         for (let x = xa - (fr.y1 - fr.y0); x < xb; x += 6) { ctx.beginPath(); ctx.moveTo(x, fr.y1); ctx.lineTo(x + (fr.y1 - fr.y0), fr.y0); ctx.stroke(); }
         ctx.restore();
       }
       ctx.restore();
     }
-    // ghost spectra of explored starting designs
+    // ghost spectra of explored starting designs (R; in the dual mode R = Rs and R2 = Rp dashed)
     if (s.ghosts && s.ghosts.length) {
       const order = s.ghosts.map((g, i) => i).sort((a, b) => (s.ghosts[a].best ? 1 : 0) - (s.ghosts[b].best ? 1 : 0) || (a === s.ghostHighlight ? 1 : 0) - (b === s.ghostHighlight ? 1 : 0));
       for (const i of order) {
         const gh = s.ghosts[i]; if (!gh.R) continue;
         const hl = i === s.ghostHighlight;
-        ctx.beginPath();
-        for (let k = 0; k < gh.wl.length; k++) { const x = xs(gh.wl[k]), y = ys(gh.R[k]); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
-        // multi-start lines share the line width of the synthesis curve (2.25 px); only colour and dash differ
-        if (hl) { ctx.strokeStyle = T.needle; ctx.lineWidth = 2.5; ctx.globalAlpha = 1; ctx.setLineDash([]); }
-        else if (gh.best) { ctx.strokeStyle = T.good; ctx.lineWidth = 2.25; ctx.globalAlpha = 0.9; ctx.setLineDash([7, 5]); }
-        else { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 2.25; ctx.globalAlpha = 0.4; ctx.setLineDash([7, 5]); }
-        ctx.stroke(); ctx.globalAlpha = 1; ctx.setLineDash([]);
+        for (const [arr, dash] of [[gh.R, [7, 5]], [gh.R2, [2, 4]]]) {
+          if (!arr) continue;
+          ctx.beginPath();
+          for (let k = 0; k < gh.wl.length; k++) { const x = xs(gh.wl[k]), y = ys(arr[k]); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+          // multi-start lines share the line width of the synthesis curve (2.25 px); only colour and dash differ
+          if (hl) { ctx.strokeStyle = T.needle; ctx.lineWidth = 2.5; ctx.globalAlpha = 1; ctx.setLineDash(arr === gh.R2 ? [2, 4] : []); }
+          else if (gh.best) { ctx.strokeStyle = T.good; ctx.lineWidth = 2.25; ctx.globalAlpha = 0.9; ctx.setLineDash(dash); }
+          else { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 2.25; ctx.globalAlpha = 0.4; ctx.setLineDash(dash); }
+          ctx.stroke(); ctx.globalAlpha = 1; ctx.setLineDash([]);
+        }
       }
       const hl = s.ghostHighlight != null ? s.ghosts[s.ghostHighlight] : null;
       if (hl) {
-        let mean = 0; if (s.target && s.target.length) { for (let k = 0; k < s.target.length; k++) mean += s.target[k]; mean /= s.target.length; }
+        const t0 = this.targetOf('s');
+        let mean = 0; if (t0 && t0.length) { for (let k = 0; k < t0.length; k++) mean += t0[k]; mean /= t0.length; }
         const top = mean <= 0.5;
         ctx.fillStyle = T.ink; ctx.font = `600 11px ${T.font}`; ctx.textAlign = 'left'; ctx.textBaseline = top ? 'top' : 'bottom';
         ctx.fillText(`${hl.name} · F = ${fmt.sci(hl.F)} · ${hl.layers} layers`, fr.x0 + 8, top ? fr.y0 + 4 : fr.y1 - 4); ctx.font = `11px ${T.font}`;
       }
     }
-    // current R: dense display curve (or grid values) as area + line
-    const cw = s.curve ? s.curve.wl : s.grid, cR = s.curve ? s.curve.R : s.R;
-    if (cw && cR) {
-      ctx.beginPath();
-      for (let i = 0; i < cw.length; i++) { const x = xs(cw[i]), y = ys(cR[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
-      ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2.25; ctx.lineJoin = 'round';
-      if (s.curveDashed) { ctx.setLineDash([7, 5]); ctx.stroke(); ctx.setLineDash([]); }
-      else {
-        ctx.stroke();
-        ctx.lineTo(xs(cw[cw.length - 1]), ys(y0)); ctx.lineTo(xs(cw[0]), ys(y0)); ctx.closePath();
-        ctx.fillStyle = T['series-current-fill']; ctx.fill();
+    if (s.dual && s.curve && s.curve.Rs && s.curve.Rp) {
+      // «Rs & Rp»: both polarizations are full curves — Rs solid with area, Rp dashed
+      for (const [arr, dash, area] of [[s.curve.Rs, [], true], [s.curve.Rp, [7, 5], false]]) {
+        ctx.beginPath();
+        for (let i = 0; i < s.curve.wl.length; i++) { const x = xs(s.curve.wl[i]), y = ys(arr[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+        ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2.25; ctx.lineJoin = 'round';
+        ctx.setLineDash(s.curveDashed ? [7, 5] : dash); ctx.stroke(); ctx.setLineDash([]);
+        if (area && !s.curveDashed) {
+          ctx.lineTo(xs(s.curve.wl[s.curve.wl.length - 1]), ys(y0)); ctx.lineTo(xs(s.curve.wl[0]), ys(y0)); ctx.closePath();
+          ctx.fillStyle = T['series-current-fill']; ctx.fill();
+        }
+      }
+    } else {
+      // s and p polarizations at oblique incidence: thin solid (s) and dashed (p) lines under the characteristic
+      if (s.showPols && s.curve && s.curve.Rs && s.curve.Rp && !s.curveDashed) {
+        for (const [arr, dash, on] of [[s.curve.Rs, [], s.showRs], [s.curve.Rp, [5, 4], s.showRp]]) {
+          if (!on) continue;
+          ctx.beginPath();
+          for (let i = 0; i < s.curve.wl.length; i++) { const x = xs(s.curve.wl[i]), y = ys(arr[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+          ctx.strokeStyle = T['series-current']; ctx.lineWidth = 1.25; ctx.globalAlpha = 0.7; ctx.setLineDash(dash); ctx.stroke();
+        }
+        ctx.setLineDash([]); ctx.globalAlpha = 1;
+      }
+      // current R: dense display curve (or grid values) as area + line
+      const cw = s.curve ? s.curve.wl : s.grid, cR = s.curve ? s.curve.R : s.R;
+      if (cw && cR) {
+        ctx.beginPath();
+        for (let i = 0; i < cw.length; i++) { const x = xs(cw[i]), y = ys(cR[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+        ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2.25; ctx.lineJoin = 'round';
+        if (s.curveDashed) { ctx.setLineDash([7, 5]); ctx.stroke(); ctx.setLineDash([]); }
+        else {
+          ctx.stroke();
+          ctx.lineTo(xs(cw[cw.length - 1]), ys(y0)); ctx.lineTo(xs(cw[0]), ys(y0)); ctx.closePath();
+          ctx.fillStyle = T['series-current-fill']; ctx.fill();
+        }
       }
     }
-    // target: thick step line
-    ctx.strokeStyle = T['series-target']; ctx.lineWidth = 3; ctx.lineCap = 'round';
-    ctx.setLineDash([]);
-    for (const b of s.bands) { ctx.beginPath(); ctx.moveTo(xs(b.from), ys(b.R)); ctx.lineTo(xs(b.to), ys(b.R)); ctx.stroke(); }
-    ctx.lineWidth = 1; ctx.setLineDash([3, 4]); ctx.strokeStyle = T['ink-3'];
-    for (let i = 0; i < s.bands.length - 1; i++) { const x = Math.round(xs(s.bands[i].to)) + 0.5; ctx.beginPath(); ctx.moveTo(x, fr.y0); ctx.lineTo(x, fr.y1); ctx.stroke(); }
-    ctx.setLineDash([]);
-    // grid points as small dots on the target line (hollow = zero weight, ring = added by enrichment)
+    // targets: thick step lines — the Rp target (set 1) dashed
+    sets.forEach((bands, set) => {
+      ctx.strokeStyle = T['series-target']; ctx.lineWidth = 3; ctx.lineCap = set ? 'butt' : 'round';
+      ctx.setLineDash(set ? [9, 6] : []);
+      for (const b of bands) { ctx.beginPath(); ctx.moveTo(xs(b.from), ys(b.R)); ctx.lineTo(xs(b.to), ys(b.R)); ctx.stroke(); }
+      ctx.lineWidth = 1; ctx.setLineDash([3, 4]); ctx.strokeStyle = T['ink-3'];
+      for (let i = 0; i < bands.length - 1; i++) { const x = Math.round(xs(bands[i].to)) + 0.5; ctx.beginPath(); ctx.moveTo(x, fr.y0); ctx.lineTo(x, fr.y1); ctx.stroke(); }
+      ctx.setLineDash([]);
+    });
+    // grid points as small dots on the target line(s) (hollow = zero weight, ring = added by enrichment)
     if (s.grid && s.target && s.grid.length <= 600) {
-      for (let i = 0; i < s.grid.length; i++) {
-        const x = xs(s.grid[i]), y = ys(s.target[i]);
-        const zero = s.weights && s.weights[i] <= 0;
-        const added = s.added && s.added.has(s.grid[i]);
-        ctx.beginPath(); ctx.arc(x, y, added ? 3.2 : 2, 0, Math.PI * 2);
-        if (zero) { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 1; ctx.stroke(); }
-        else if (added) { ctx.fillStyle = T.card; ctx.fill(); ctx.strokeStyle = T.good; ctx.lineWidth = 1.5; ctx.stroke(); }
-        else { ctx.fillStyle = T['ink-3']; ctx.fill(); }
+      const keys = s.dual ? ['s', 'p'] : ['s'];
+      for (const key of keys) {
+        const tg = this.targetOf(key), wg = this.weightsOf(key);
+        if (!tg) continue;
+        for (let i = 0; i < s.grid.length; i++) {
+          const x = xs(s.grid[i]), y = ys(tg[i]);
+          const zero = wg && wg[i] <= 0;
+          const added = s.added && s.added.has(s.grid[i]);
+          ctx.beginPath(); ctx.arc(x, y, added ? 3.2 : 2, 0, Math.PI * 2);
+          if (zero) { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 1; ctx.stroke(); }
+          else if (added) { ctx.fillStyle = T.card; ctx.fill(); ctx.strokeStyle = T.good; ctx.lineWidth = 1.5; ctx.stroke(); }
+          else { ctx.fillStyle = T['ink-3']; ctx.fill(); }
+        }
       }
     }
     // hover crosshair
     if (this.hover && !this.drag && s.grid && this.hoverIndex != null && !this.tooltip.hidden) {
       const i = this.hoverIndex, x = Math.round(xs(s.grid[i])) + 0.5;
       ctx.strokeStyle = T['ink-3']; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(x, fr.y0); ctx.lineTo(x, fr.y1); ctx.stroke(); ctx.setLineDash([]);
-      if (s.R) { ctx.fillStyle = T['series-current']; ctx.beginPath(); ctx.arc(xs(s.grid[i]), ys(s.R[i]), 4, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = T.card; ctx.lineWidth = 2; ctx.stroke(); }
+      const dot = (yv) => { ctx.fillStyle = T['series-current']; ctx.beginPath(); ctx.arc(xs(s.grid[i]), ys(yv), 4, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = T.card; ctx.lineWidth = 2; ctx.stroke(); };
+      if (s.dual && s.curve && s.curve.Rs) { let ci = 0, cd = Infinity; for (let k = 0; k < s.curve.wl.length; k++) { const d = Math.abs(s.curve.wl[k] - s.grid[i]); if (d < cd) { cd = d; ci = k; } } dot(s.curve.Rs[ci]); dot(s.curve.Rp[ci]); }
+      else if (s.R) dot(s.R[i]);
     }
     ctx.restore();
     // handles
     if (s.editable) {
       const hov = this.hover?.handle, drag = this.drag;
       for (const h of this.handles()) {
-        const active = (drag && drag.type === h.type && drag.index === h.index) || (!drag && hov && hov.type === h.type && hov.index === h.index);
+        const active = (drag && drag.type === h.type && drag.index === h.index && drag.set === h.set) || (!drag && hov && hov.type === h.type && hov.index === h.index && hov.set === h.set);
         const r = active ? 7 : 5.5;
         ctx.beginPath(); ctx.arc(h.x, h.y, r, 0, Math.PI * 2);
         ctx.fillStyle = h.type === 'level' ? T.card : T.accent; ctx.fill();
-        ctx.lineWidth = 2; ctx.strokeStyle = h.type === 'level' ? T['series-target'] : T.card; ctx.stroke();
+        ctx.lineWidth = 2; ctx.strokeStyle = h.type === 'level' ? T['series-target'] : T.card;
+        if (h.set) ctx.setLineDash([3, 2.5]);
+        ctx.stroke(); ctx.setLineDash([]);
         if (h.type !== 'level') {
           ctx.strokeStyle = T.accent; ctx.lineWidth = 1; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(Math.round(h.x) + 0.5, h.y + r); ctx.lineTo(Math.round(h.x) + 0.5, fr.y1); ctx.stroke(); ctx.setLineDash([]);
         }
         if (active) {
           ctx.fillStyle = T.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.font = `600 11px ${T.font}`;
-          const label = h.type === 'level' ? fmt.pct(s.bands[h.index].R, 1) : h.type === 'boundary' ? `${s.bands[h.index].to} nm` : h.type === 'range-min' ? `${s.lambdaMin} nm` : `${s.lambdaMax} nm`;
+          const bands = sets[h.set] || s.bands;
+          const pol = s.dual ? (h.set ? 'Rp ' : 'Rs ') : '';
+          const label = h.type === 'level' ? `${pol}${fmt.pct(bands[h.index].R, 1)}` : h.type === 'boundary' ? `${pol}${bands[h.index].to} nm` : h.type === 'range-min' ? `${s.lambdaMin} nm` : `${s.lambdaMax} nm`;
           ctx.fillText(label, h.x, h.y - 10);
           ctx.font = `11px ${T.font}`;
         }
@@ -459,7 +536,7 @@ export class StructureChart extends Plot {
   constructor(canvas, tooltip) {
     super(canvas, { l: 66, r: 18, t: 16, b: 34 });
     this.tooltip = tooltip;
-    this.state = { xmax: 1, layers: [], nmax: 2.5, highlight: null, substrate: 'BK7', ns: 1.52 };
+    this.state = { xmax: 1, layers: [], nmax: 2.5, highlight: null, substrate: 'BK7', ns: 1.52, ambient: 'air', na: 1 };
     canvas.addEventListener('pointermove', (e) => this.onMove(e));
     canvas.addEventListener('pointerleave', () => { this.tooltip.hidden = true; });
   }
@@ -521,9 +598,13 @@ export class StructureChart extends Plot {
       }
       z += L.d;
     }
-    // ambient label
+    // ambient medium: label, and its index level when it is not air
+    if (s.na > 1) {
+      const ya = ys(s.na);
+      ctx.fillStyle = T.substrate; ctx.globalAlpha = 0.35; ctx.fillRect(xs(z), ya, Math.max(0, fr.x1 - xs(z)), fr.y1 - ya); ctx.globalAlpha = 1;
+    }
     ctx.fillStyle = T['ink-3']; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    if (xs(z) + 36 < fr.x1) ctx.fillText('air', xs(z) + 8, (fr.y0 + fr.y1) / 2);
+    if (xs(z) + 36 < fr.x1) ctx.fillText(s.ambient || 'air', xs(z) + 8, (fr.y0 + fr.y1) / 2);
     ctx.fillStyle = T['ink-3']; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
     ctx.fillText(`${s.layers.length} layer${s.layers.length === 1 ? '' : 's'} · ${fmtNum(z, 0)} nm`, fr.x1, fr.y0 + 2);
   }
