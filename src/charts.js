@@ -7,7 +7,7 @@
 
 const themeCache = { dirty: true, values: {} };
 const THEME_KEYS = ['--ink', '--ink-2', '--ink-3', '--grid', '--line', '--card', '--accent', '--series-current', '--series-current-fill',
-  '--series-target', '--mat-h', '--mat-h-fill', '--mat-l', '--mat-l-fill', '--needle', '--needle-fill', '--substrate', '--good', '--bad', '--control'];
+  '--series-target', '--pol-s', '--pol-p', '--mat-h', '--mat-h-fill', '--mat-l', '--mat-l-fill', '--needle', '--needle-fill', '--substrate', '--good', '--bad', '--control'];
 export function theme() {
   if (themeCache.dirty) {
     const cs = getComputedStyle(document.documentElement);
@@ -75,6 +75,14 @@ class Plot {
   destroy() { this.ro.disconnect(); }
 }
 const SUB_W = 44; // width of the substrate block left of z = 0 in the z-charts
+/* Spectrum chart line system.
+   Target: a translucent band TARGET_H px tall centred on the required level — thicker than any curve, the computed
+   spectra stay visible through it. Curves: the optimized characteristic («current») is CURVE_W px solid blue with an area
+   fill; the s‑polarization is blue‑green and solid, the p‑polarization magenta and dashed (hue and dash both carry the
+   distinction). In the «Rs & Rp» mode the two polarizations are both full curves and their target bands take the same
+   tints, the Rp band with a dashed edge. Multi‑start previews and ghosts never use the Rp dash: the start being explored
+   is the lighter blue curve without fill, finished starts are thin grey, the leader green, the hovered one orange. */
+const TARGET_H = 7, CURVE_W = 2.25, POL_W = 1.5, DASH_P = [6, 4];
 const lin = (d0, d1, r0, r1) => { const k = (r1 - r0) / ((d1 - d0) || 1); const f = (v) => r0 + (v - d0) * k; f.invert = (p) => d0 + (p - r0) / k; return f; };
 
 /* ===================================================================== */
@@ -85,7 +93,8 @@ export class SpectrumChart extends Plot {
     super(canvas, { l: 66, r: 18, t: 26, b: 34 });
     this.tooltip = tooltip;
     // bands: the target (Rs target in the «Rs & Rp» mode); bands2: the Rp target when `dual`
-    this.state = { lambdaMin: 400, lambdaMax: 700, bands: [], bands2: null, dual: false, grid: null, target: null, R: null, weights: null, added: null, curve: null, curveDashed: false, transition: 0, yMode: 'full', editable: true, ghosts: [], ghostHighlight: null, showPols: false, showRs: true, showRp: true, charLabel: 'R' };
+    // preview: the curve belongs to a start being explored in the background (multi‑start) — drawn lighter, without fill
+    this.state = { lambdaMin: 400, lambdaMax: 700, bands: [], bands2: null, dual: false, grid: null, target: null, R: null, weights: null, added: null, curve: null, preview: false, transition: 0, yMode: 'full', editable: true, ghosts: [], ghostHighlight: null, showPols: false, showRs: true, showRp: true, charLabel: 'R' };
     this.onChange = null;      // (patch) => void
     this.hover = null; this.drag = null;
     const c = canvas;
@@ -259,7 +268,9 @@ export class SpectrumChart extends Plot {
     const xt = { ticks: niceTicks(xs.invert(fr.x0), xs.invert(fr.x1), Math.max(3, Math.floor((fr.x1 - fr.x0) / 90))), scale: xs };
     const yt = { ticks: niceTicks(y0, y1, Math.max(3, Math.floor((fr.y1 - fr.y0) / 44))), scale: ys };
     this.axes(ctx, fr, xt, yt, (v) => fmtNum(v), (v) => `${fmtNum(100 * v, y1 - y0 < 0.1 ? 2 : 0)} %`, 'wavelength, nm', 'reflectance R');
-    ctx.save(); ctx.beginPath(); ctx.rect(fr.x0, fr.y0 - 1, fr.x1 - fr.x0, fr.y1 - fr.y0 + 2); ctx.clip();
+    // the clip leaves room for a target band sitting on 0 % or 100 %
+    const over = TARGET_H / 2 + 1;
+    ctx.save(); ctx.beginPath(); ctx.rect(fr.x0, fr.y0 - over, fr.x1 - fr.x0, fr.y1 - fr.y0 + 2 * over); ctx.clip();
     // transition zones around target jumps (zero weight) of every target
     if (s.transition > 0) {
       ctx.save(); ctx.strokeStyle = T['ink-3']; ctx.globalAlpha = 0.35; ctx.lineWidth = 1;
@@ -271,21 +282,22 @@ export class SpectrumChart extends Plot {
       }
       ctx.restore();
     }
-    // ghost spectra of explored starting designs (R; in the dual mode R = Rs and R2 = Rp dashed)
+    const polyline = (wl, arr) => { ctx.beginPath(); for (let k = 0; k < wl.length; k++) { const x = xs(wl[k]), y = ys(arr[k]); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } };
+    // ghost spectra of explored starting designs (R; in the dual mode R = Rs solid and R2 = Rp dashed)
     if (s.ghosts && s.ghosts.length) {
       const order = s.ghosts.map((g, i) => i).sort((a, b) => (s.ghosts[a].best ? 1 : 0) - (s.ghosts[b].best ? 1 : 0) || (a === s.ghostHighlight ? 1 : 0) - (b === s.ghostHighlight ? 1 : 0));
+      ctx.lineJoin = 'round';
       for (const i of order) {
         const gh = s.ghosts[i]; if (!gh.R) continue;
         const hl = i === s.ghostHighlight;
-        for (const [arr, dash] of [[gh.R, [7, 5]], [gh.R2, [2, 4]]]) {
+        for (const [arr, dash] of [[gh.R, []], [gh.R2, DASH_P]]) {
           if (!arr) continue;
-          ctx.beginPath();
-          for (let k = 0; k < gh.wl.length; k++) { const x = xs(gh.wl[k]), y = ys(arr[k]); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
-          // multi-start lines share the line width of the synthesis curve (2.25 px); only colour and dash differ
-          if (hl) { ctx.strokeStyle = T.needle; ctx.lineWidth = 2.5; ctx.globalAlpha = 1; ctx.setLineDash(arr === gh.R2 ? [2, 4] : []); }
-          else if (gh.best) { ctx.strokeStyle = T.good; ctx.lineWidth = 2.25; ctx.globalAlpha = 0.9; ctx.setLineDash(dash); }
-          else { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 2.25; ctx.globalAlpha = 0.4; ctx.setLineDash(dash); }
-          ctx.stroke(); ctx.globalAlpha = 1; ctx.setLineDash([]);
+          polyline(gh.wl, arr);
+          // finished starts are thinner than the synthesis curve and grey; the leader green; the hovered start orange and full weight
+          if (hl) { ctx.strokeStyle = T.needle; ctx.lineWidth = 2.5; ctx.globalAlpha = 1; }
+          else if (gh.best) { ctx.strokeStyle = T.good; ctx.lineWidth = 1.75; ctx.globalAlpha = 0.9; }
+          else { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 1.25; ctx.globalAlpha = 0.45; }
+          ctx.setLineDash(dash); ctx.stroke(); ctx.globalAlpha = 1; ctx.setLineDash([]);
         }
       }
       const hl = s.ghostHighlight != null ? s.ghosts[s.ghostHighlight] : null;
@@ -297,48 +309,47 @@ export class SpectrumChart extends Plot {
         ctx.fillText(`${hl.name} · F = ${fmt.sci(hl.F)} · ${hl.layers} layers`, fr.x0 + 8, top ? fr.y0 + 4 : fr.y1 - 4); ctx.font = `11px ${T.font}`;
       }
     }
+    // the area under a curve down to the bottom of the frame
+    const area = (wl, arr, fill) => { polyline(wl, arr); ctx.lineTo(xs(wl[wl.length - 1]), ys(y0)); ctx.lineTo(xs(wl[0]), ys(y0)); ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); };
+    const previewAlpha = s.preview ? 0.6 : 1;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'butt';
     if (s.dual && s.curve && s.curve.Rs && s.curve.Rp) {
-      // «Rs & Rp»: both polarizations are full curves — Rs solid with area, Rp dashed
-      for (const [arr, dash, area] of [[s.curve.Rs, [], true], [s.curve.Rp, [7, 5], false]]) {
-        ctx.beginPath();
-        for (let i = 0; i < s.curve.wl.length; i++) { const x = xs(s.curve.wl[i]), y = ys(arr[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
-        ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2.25; ctx.lineJoin = 'round';
-        ctx.setLineDash(s.curveDashed ? [7, 5] : dash); ctx.stroke(); ctx.setLineDash([]);
-        if (area && !s.curveDashed) {
-          ctx.lineTo(xs(s.curve.wl[s.curve.wl.length - 1]), ys(y0)); ctx.lineTo(xs(s.curve.wl[0]), ys(y0)); ctx.closePath();
-          ctx.fillStyle = T['series-current-fill']; ctx.fill();
-        }
+      // «Rs & Rp»: both polarizations are full curves of equal weight — Rs solid blue‑green, Rp dashed magenta, no fill
+      for (const [arr, dash, color] of [[s.curve.Rs, [], T['pol-s']], [s.curve.Rp, DASH_P, T['pol-p']]]) {
+        polyline(s.curve.wl, arr);
+        ctx.strokeStyle = color; ctx.lineWidth = CURVE_W; ctx.globalAlpha = previewAlpha; ctx.setLineDash(dash); ctx.stroke();
       }
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
     } else {
-      // s and p polarizations at oblique incidence: thin solid (s) and dashed (p) lines under the characteristic
-      if (s.showPols && s.curve && s.curve.Rs && s.curve.Rp && !s.curveDashed) {
-        for (const [arr, dash, on] of [[s.curve.Rs, [], s.showRs], [s.curve.Rp, [5, 4], s.showRp]]) {
+      // s and p polarizations at oblique incidence: thin lines in their own hues beneath the characteristic (not in previews)
+      if (s.showPols && s.curve && s.curve.Rs && s.curve.Rp && !s.preview) {
+        for (const [arr, dash, color, on] of [[s.curve.Rs, [], T['pol-s'], s.showRs], [s.curve.Rp, DASH_P, T['pol-p'], s.showRp]]) {
           if (!on) continue;
-          ctx.beginPath();
-          for (let i = 0; i < s.curve.wl.length; i++) { const x = xs(s.curve.wl[i]), y = ys(arr[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
-          ctx.strokeStyle = T['series-current']; ctx.lineWidth = 1.25; ctx.globalAlpha = 0.7; ctx.setLineDash(dash); ctx.stroke();
+          polyline(s.curve.wl, arr);
+          ctx.strokeStyle = color; ctx.lineWidth = POL_W; ctx.globalAlpha = 0.85; ctx.setLineDash(dash); ctx.stroke();
         }
         ctx.setLineDash([]); ctx.globalAlpha = 1;
       }
       // current R: dense display curve (or grid values) as area + line
       const cw = s.curve ? s.curve.wl : s.grid, cR = s.curve ? s.curve.R : s.R;
       if (cw && cR) {
-        ctx.beginPath();
-        for (let i = 0; i < cw.length; i++) { const x = xs(cw[i]), y = ys(cR[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
-        ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2.25; ctx.lineJoin = 'round';
-        if (s.curveDashed) { ctx.setLineDash([7, 5]); ctx.stroke(); ctx.setLineDash([]); }
-        else {
-          ctx.stroke();
-          ctx.lineTo(xs(cw[cw.length - 1]), ys(y0)); ctx.lineTo(xs(cw[0]), ys(y0)); ctx.closePath();
-          ctx.fillStyle = T['series-current-fill']; ctx.fill();
-        }
+        if (!s.preview) area(cw, cR, T['series-current-fill']);
+        polyline(cw, cR);
+        ctx.strokeStyle = T['series-current']; ctx.lineWidth = CURVE_W; ctx.globalAlpha = previewAlpha; ctx.stroke(); ctx.globalAlpha = 1;
       }
     }
-    // targets: thick step lines — the Rp target (set 1) dashed
+    // targets: translucent bands centred on the required level — the computed spectra remain visible through them;
+    // in the «Rs & Rp» mode the Rs band is tinted blue‑green and the Rp band (set 1) magenta with a dashed edge
     sets.forEach((bands, set) => {
-      ctx.strokeStyle = T['series-target']; ctx.lineWidth = 3; ctx.lineCap = set ? 'butt' : 'round';
-      ctx.setLineDash(set ? [9, 6] : []);
-      for (const b of bands) { ctx.beginPath(); ctx.moveTo(xs(b.from), ys(b.R)); ctx.lineTo(xs(b.to), ys(b.R)); ctx.stroke(); }
+      const color = s.dual ? (set ? T['pol-p'] : T['pol-s']) : T['series-target'];
+      const half = TARGET_H / 2;
+      for (const b of bands) {
+        const x0 = xs(b.from), x1 = xs(b.to), yc = ys(b.R);
+        ctx.fillStyle = color; ctx.globalAlpha = s.dual ? 0.26 : 0.22; ctx.fillRect(x0, yc - half, x1 - x0, TARGET_H);
+        ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.globalAlpha = set ? 0.8 : 0.5; ctx.setLineDash(set ? [4, 3] : []);
+        ctx.strokeRect(Math.round(x0) + 0.5, Math.round(yc - half) + 0.5, Math.max(1, Math.round(x1 - x0) - 1), TARGET_H - 1);
+      }
+      ctx.globalAlpha = 1; ctx.setLineDash([]);
       ctx.lineWidth = 1; ctx.setLineDash([3, 4]); ctx.strokeStyle = T['ink-3'];
       for (let i = 0; i < bands.length - 1; i++) { const x = Math.round(xs(bands[i].to)) + 0.5; ctx.beginPath(); ctx.moveTo(x, fr.y0); ctx.lineTo(x, fr.y1); ctx.stroke(); }
       ctx.setLineDash([]);
@@ -364,9 +375,9 @@ export class SpectrumChart extends Plot {
     if (this.hover && !this.drag && s.grid && this.hoverIndex != null && !this.tooltip.hidden) {
       const i = this.hoverIndex, x = Math.round(xs(s.grid[i])) + 0.5;
       ctx.strokeStyle = T['ink-3']; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(x, fr.y0); ctx.lineTo(x, fr.y1); ctx.stroke(); ctx.setLineDash([]);
-      const dot = (yv) => { ctx.fillStyle = T['series-current']; ctx.beginPath(); ctx.arc(xs(s.grid[i]), ys(yv), 4, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = T.card; ctx.lineWidth = 2; ctx.stroke(); };
-      if (s.dual && s.curve && s.curve.Rs) { let ci = 0, cd = Infinity; for (let k = 0; k < s.curve.wl.length; k++) { const d = Math.abs(s.curve.wl[k] - s.grid[i]); if (d < cd) { cd = d; ci = k; } } dot(s.curve.Rs[ci]); dot(s.curve.Rp[ci]); }
-      else if (s.R) dot(s.R[i]);
+      const dot = (yv, color) => { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(xs(s.grid[i]), ys(yv), 4, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = T.card; ctx.lineWidth = 2; ctx.stroke(); };
+      if (s.dual && s.curve && s.curve.Rs) { let ci = 0, cd = Infinity; for (let k = 0; k < s.curve.wl.length; k++) { const d = Math.abs(s.curve.wl[k] - s.grid[i]); if (d < cd) { cd = d; ci = k; } } dot(s.curve.Rs[ci], T['pol-s']); dot(s.curve.Rp[ci], T['pol-p']); }
+      else if (s.R) dot(s.R[i], T['series-current']);
     }
     ctx.restore();
     // handles
@@ -375,9 +386,11 @@ export class SpectrumChart extends Plot {
       for (const h of this.handles()) {
         const active = (drag && drag.type === h.type && drag.index === h.index && drag.set === h.set) || (!drag && hov && hov.type === h.type && hov.index === h.index && hov.set === h.set);
         const r = active ? 7 : 5.5;
+        // level handles carry the colour of their target band (neutral; blue‑green Rs / dashed magenta Rp in the dual mode)
+        const levelColor = s.dual ? (h.set ? T['pol-p'] : T['pol-s']) : T['series-target'];
         ctx.beginPath(); ctx.arc(h.x, h.y, r, 0, Math.PI * 2);
         ctx.fillStyle = h.type === 'level' ? T.card : T.accent; ctx.fill();
-        ctx.lineWidth = 2; ctx.strokeStyle = h.type === 'level' ? T['series-target'] : T.card;
+        ctx.lineWidth = 2; ctx.strokeStyle = h.type === 'level' ? levelColor : T.card;
         if (h.set) ctx.setLineDash([3, 2.5]);
         ctx.stroke(); ctx.setLineDash([]);
         if (h.type !== 'level') {

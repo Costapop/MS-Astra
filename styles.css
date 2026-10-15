@@ -20,6 +20,8 @@
   --series-current: #2a78d6;
   --series-current-fill: rgba(42, 120, 214, 0.10);
   --series-target: #1d1d1f;
+  --pol-s: #0a9bb5;
+  --pol-p: #c2479c;
   --mat-h: #6250d6;
   --mat-h-fill: rgba(98, 80, 214, 0.78);
   --mat-l: #1baf7a;
@@ -53,6 +55,8 @@
     --series-current: #3987e5;
     --series-current-fill: rgba(57, 135, 229, 0.16);
     --series-target: #f5f5f7;
+    --pol-s: #2fb8d1;
+    --pol-p: #e05fb6;
     --mat-h: #9085e9;
     --mat-h-fill: rgba(144, 133, 233, 0.80);
     --mat-l: #199e70;
@@ -109,6 +113,7 @@ a:hover { text-decoration: underline; }
 .btn.primary { background: var(--accent); color: var(--accent-ink); }
 .btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, black); }
 .btn.link { background: none; color: var(--accent); padding: 4px 8px; font-size: 12px; }
+.btn.small { padding: 4px 11px; font-size: 12px; }
 .segmented { display: inline-flex; background: var(--control); border-radius: 999px; padding: 2px; }
 .segmented button {
   border: 0; background: transparent; border-radius: 999px; padding: 6px 12px; cursor: pointer; color: var(--ink-2);
@@ -117,15 +122,22 @@ a:hover { text-decoration: underline; }
 .segmented button.active { background: var(--control-active); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
 .segmented.small button { padding: 4px 10px; font-size: 12px; }
 
-/* ---------- layout ---------- */
-.layout { flex: 1; display: grid; grid-template-columns: 316px minmax(0, 1fr); gap: 16px; padding: 16px; min-height: 0; height: calc(100vh - 57px); }
+/* ---------- layout: inputs · charts · status ----------
+   Three columns. The sidebar holds everything the user enters; the centre
+   column stacks the three charts of the synthesis (spectrum, needle
+   derivative, coating structure) so that all of them stay in view while a run
+   is animated; the right rail holds the state of the run (verdict, tiles),
+   the merit history and the event log. The centre column and the rail share
+   one row template, so their cards line up row by row. */
+.layout { flex: 1; display: grid; grid-template-columns: 316px minmax(0, 1fr) 340px; gap: 16px; padding: 16px; min-height: 0; height: calc(100vh - 57px); }
 .sidebar { overflow: auto; padding-right: 2px; display: flex; flex-direction: column; gap: 12px; }
-.dashboard {
+.dashboard, .rail {
   display: grid; min-height: 0; gap: 14px;
-  grid-template-columns: minmax(0, 2.1fr) minmax(290px, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 0.85fr);
-  grid-template-areas: "spectrum stats" "needle merit" "structure log";
 }
+.dashboard { grid-template-areas: "spectrum" "needle" "structure"; }
+.rail { grid-template-areas: "stats" "merit" "log"; }
 #card-spectrum { grid-area: spectrum; }
 #card-stats { grid-area: stats; }
 #card-needle { grid-area: needle; }
@@ -150,8 +162,9 @@ a:hover { text-decoration: underline; }
 .tool input { width: 58px; text-align: right; }
 .tool input:focus, .tool select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
 .sidebar.locked ~ .dashboard .tool, .card-tools.locked .tool { opacity: 0.6; pointer-events: none; }
-.swatch.pol-s { height: 0; border-top: 2px solid var(--series-current); background: none; opacity: 0.75; }
-.swatch.pol-p { height: 0; border-top: 2px dashed var(--series-current); background: none; opacity: 0.75; }
+.swatch.pol-s { height: 0; border-top: 2px solid var(--pol-s); background: none; }
+.swatch.pol-p { height: 0; border-top: 2px dashed var(--pol-p); background: none; }
+.header-break { flex-basis: 100%; height: 0; }
 .tabs { margin-left: 4px; }
 .panel { flex: 1; min-height: 0; overflow: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 6px 18px 14px; }
 .panel h4 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); margin: 6px 0 6px; }
@@ -164,19 +177,24 @@ a:hover { text-decoration: underline; }
 .preset-table td { padding: 5px 6px 5px 0; border-bottom: 1px solid var(--line); color: var(--ink-2); vertical-align: top; }
 .preset-table td:first-child { color: var(--ink-3); white-space: nowrap; width: 38%; }
 #card-stats > header { flex-wrap: nowrap; }
+#card-structure > header { gap: 10px; }
+#card-structure > header .btn { margin-left: auto; }
 #cycle-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .timer { flex: none; font-variant-numeric: tabular-nums; font-size: 12px; color: var(--ink-2); background: var(--control); border-radius: 999px; padding: 3px 9px; }
 #btn-starts { margin-left: 6px; }
-.swatch.ghost { width: 14px; height: 0; border-top: 2px dashed var(--ink-3); background: none; }
+.swatch.ghost { width: 14px; height: 0; border-top: 2px solid var(--ink-3); background: none; opacity: 0.7; }
 .plot { flex: 1; position: relative; min-height: 0; }
 .plot canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 .legend { display: flex; gap: 12px; align-items: center; font-size: 12px; color: var(--ink-2); }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .swatch { display: inline-block; width: 14px; height: 3px; border-radius: 2px; background: var(--ink-3); }
-.swatch.target { background: var(--series-target); height: 3px; }
-.swatch.target2 { height: 0; border-top: 3px dashed var(--series-target); background: none; }
-.swatch.pol-p.thick { border-top-width: 2.5px; opacity: 1; }
+/* target swatches mirror the chart: a translucent band with a faint edge; in the «Rs & Rp» mode tinted by polarization, the Rp band with a dashed edge */
+.swatch.target { width: 16px; height: 8px; border-radius: 2px; background: color-mix(in srgb, var(--series-target) 24%, transparent); border: 1px solid color-mix(in srgb, var(--series-target) 55%, transparent); }
+.swatch.target.tint-s { background: color-mix(in srgb, var(--pol-s) 28%, transparent); border-color: color-mix(in srgb, var(--pol-s) 70%, transparent); }
+.swatch.target.target2 { background: color-mix(in srgb, var(--pol-p) 28%, transparent); border: 1px dashed color-mix(in srgb, var(--pol-p) 85%, transparent); }
+.swatch.pol-p.thick { border-top-width: 2.5px; }
 .swatch.current { background: var(--series-current); }
+.swatch.current.tint-s { background: var(--pol-s); }
 .swatch.grid { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); }
 .swatch.mat-h { background: var(--mat-h); height: 10px; border-radius: 3px; }
 .swatch.mat-l { background: var(--mat-l); height: 10px; border-radius: 3px; }
@@ -264,7 +282,8 @@ input.switch:checked::after { transform: translateX(16px); }
 
 /* ---------- log ---------- */
 .log { list-style: none; margin: 0; padding: 0 16px 12px; overflow: auto; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
-.log li { display: grid; grid-template-columns: 58px 1fr; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.log li { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.log li > span:last-child { min-width: 0; overflow-x: auto; }
 .log li .tag { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; border-radius: 6px; padding: 2px 6px; text-align: center; align-self: start; background: var(--control); color: var(--ink-2); }
 .log li.needle .tag { background: var(--needle-fill); color: var(--needle); }
 .log li.growth .tag { background: color-mix(in srgb, var(--series-current) 18%, transparent); color: var(--series-current); }
@@ -275,7 +294,9 @@ input.switch:checked::after { transform: translateX(16px); }
 .log li.grid .tag, .log li.dense .tag { background: color-mix(in srgb, var(--good) 14%, transparent); color: var(--good); }
 .log li.explore .tag { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
 .log table.cmp { border-collapse: collapse; margin-top: 3px; font-size: 11px; }
-.log table.cmp td, .log table.cmp th { padding: 1px 6px 1px 0; text-align: right; color: var(--ink-3); font-weight: 500; }
+.log table.cmp td, .log table.cmp th { padding: 1px 6px 1px 0; text-align: right; color: var(--ink-3); font-weight: 500; white-space: nowrap; vertical-align: top; }
+.log table.cmp td:first-child, .log table.cmp th:first-child { white-space: normal; min-width: 72px; }
+.log table.cmp td.detail { text-align: left; white-space: normal; min-width: 96px; }
 .log table.cmp td:first-child, .log table.cmp th:first-child { text-align: left; }
 .log table.cmp tr.chosen td { color: var(--ink); font-weight: 600; }
 #card-stats { overflow: auto; }
@@ -317,13 +338,18 @@ dialog.sheet header { display: flex; align-items: center; justify-content: space
   .progress { margin: 8px 16px 4px; }
 }
 @media (max-width: 900px) { .panel { grid-template-columns: 1fr; } }
+@media (max-width: 1400px) {
+  .layout { grid-template-columns: 284px minmax(0, 1fr) 308px; gap: 14px; }
+  .row select { width: 128px; }
+  #card-structure .opt { display: none; }
+}
 @media (max-width: 1180px) {
   .layout { grid-template-columns: 1fr; height: auto; flex: none; }
-  .sidebar { order: 2; overflow: visible; }
-  .dashboard {
-    grid-template-columns: 1fr; grid-template-rows: none; min-height: auto;
-    grid-template-areas: "spectrum" "stats" "needle" "structure" "merit" "log";
-  }
+  .sidebar { order: 3; overflow: visible; }
+  .dashboard { order: 1; }
+  .rail { order: 2; }
+  .dashboard, .rail { grid-template-rows: none; min-height: auto; }
+  .row select { width: 140px; }
   .card { min-height: 300px; }
   #card-stats, #card-log { min-height: 200px; }
   .topbar { flex-wrap: wrap; }

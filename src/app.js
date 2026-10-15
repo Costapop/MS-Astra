@@ -9,7 +9,7 @@ import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
 
-export const VERSION = '2.3.2';
+export const VERSION = '2.4.0';
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------------ */
@@ -103,7 +103,7 @@ function renderBands() {
   $('bands2-wrap').hidden = !dual();
   $('bands-title').textContent = dual() ? 'Target Rs bands' : 'Target reflectance bands';
   $('bands-hint').textContent = dual()
-    ? 'Rs and Rp each have their own target. Edit the values here, or on the chart: drag a level or a boundary of either target (Rs solid, Rp dashed), double‑click a band to split it, double‑click a boundary to merge.'
+    ? 'Rs and Rp each have their own target. Edit the values here, or on the chart: drag a level or a boundary of either target band (Rs blue‑green, Rp magenta with a dashed edge), double‑click a band to split it, double‑click a boundary to merge.'
     : 'Edit the values here, or on the chart: drag a level or a boundary, double‑click a band to split it, double‑click a boundary to merge.';
   if (dual()) renderBandSet($('bands2'), settings.bands2, 'Rp');
 }
@@ -179,11 +179,14 @@ function updateIncidence() {
   $('legend-target2').hidden = !d;
   $('legend-current-text').textContent = d ? 'Current Rs' : `Current ${charLabel()}`;
   // the other polarization(s) as thin lines: both for the mean characteristic, the complementary one for Rs or Rp;
-  // in the «Rs & Rp» mode Rs and Rp are both full curves (Rp dashed)
+  // in the «Rs & Rp» mode Rs and Rp are both full curves in their own hues (Rs solid blue‑green, Rp dashed magenta)
+  // and the target bands take the same tints
   $('legend-rs').hidden = !oblique() || settings.pol === 's' || d;
   $('legend-rp').hidden = !oblique() || settings.pol === 'p';
   $('legend-rp-text').textContent = d ? 'Current Rp' : 'Rp';
   $('swatch-rp').classList.toggle('thick', d);
+  $('swatch-target').classList.toggle('tint-s', d);
+  $('swatch-current').classList.toggle('tint-s', d);
   spectrum.set({ dual: d, bands2: d ? settings.bands2 : null, showPols: oblique(), showRs: settings.pol !== 's', showRp: settings.pol !== 'p', charLabel: charLabel() });
   $('structure-ambient').textContent = `substrate → ${settings.ambient === 'Air' ? 'air' : ambient().label}`;
   structure.set({ ambient: settings.ambient === 'Air' ? 'air' : ambient().label, na: ambient().n });
@@ -601,8 +604,8 @@ function applyEvent(ev, snap, opts = {}) {
       if (!quiet) $('card-stats').scrollTop = 0;
       const checks = ev.stop && ev.stop.checks ? ev.stop.checks : [];
       const failed = checks.filter((c) => !c.ok);
-      if (checks.length) log(failed.length ? 'check bad' : 'check', `Termination reason self‑check: ${failed.length ? `${failed.length} of ${checks.length} checks failed` : `all ${checks.length} checks passed`}.<table class="cmp"><tr><th>check</th><th>result</th><th>detail</th></tr>${checks.map((c) => `<tr><td>${c.name}</td><td>${c.ok ? '✓' : '✗'}</td><td>${c.detail || ''}</td></tr>`).join('')}</table>`);
-      const factsTable = ev.stop && ev.stop.summary ? `<table class="cmp"><tr><th>stopping condition</th><th>holds</th><th>detail</th></tr>${ev.stop.summary.facts.map((f) => `<tr class="${f.decisive ? 'chosen' : ''}"><td>${f.label}${f.decisive ? ' (decisive)' : ''}</td><td>${f.hit ? '●' : '○'}</td><td style="text-align:left">${f.text}</td></tr>`).join('')}</table>` : '';
+      if (checks.length) log(failed.length ? 'check bad' : 'check', `Termination reason self‑check: ${failed.length ? `${failed.length} of ${checks.length} checks failed` : `all ${checks.length} checks passed`}.<table class="cmp"><tr><th>check</th><th>result</th><th>detail</th></tr>${checks.map((c) => `<tr><td>${c.name}</td><td>${c.ok ? '✓' : '✗'}</td><td class="detail">${c.detail || ''}</td></tr>`).join('')}</table>`);
+      const factsTable = ev.stop && ev.stop.summary ? `<table class="cmp"><tr><th>stopping condition</th><th>holds</th><th>detail</th></tr>${ev.stop.summary.facts.map((f) => `<tr class="${f.decisive ? 'chosen' : ''}"><td>${f.label}${f.decisive ? ' (decisive)' : ''}</td><td>${f.hit ? '●' : '○'}</td><td class="detail">${f.text}</td></tr>`).join('')}</table>` : '';
       log('done', `<b>${headline}.</b> ${ev.reason}. ${verdict.selectionText} Reported: ${ev.stop && ev.stop.summary ? ev.stop.summary.reported : 'final design'} — ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>${ev.dense ? `, dense‑grid F = ${fmt.sci(ev.dense.F)}` : ''}.${ev.stop && ev.stop.summary && ev.stop.summary.guarantee ? ` ${ev.stop.summary.guarantee}` : ''} Needles ${ev.stats.needles} (of ${ev.stats.compared} refined alternatives), growth steps ${ev.stats.growths}, thin layers removed ${ev.stats.cleanups}${ev.stats.pointsAdded ? `, grid points added ${ev.stats.pointsAdded}` : ''}, ${(ev.elapsedMs / 1000).toFixed(1)} s of computation.${factsTable}`);
       $('btn-run').textContent = 'Start synthesis'; $('btn-export').disabled = false; $('btn-step').disabled = true;
       unlockSidebar();
@@ -681,7 +684,7 @@ function startExploration() {
     li.addEventListener('mouseenter', () => highlightGhost(i)); li.addEventListener('mouseleave', () => highlightGhost(null));
     ol.appendChild(li);
   });
-  view.hideCurve = false; spectrum.set({ curveDashed: true, ghosts: run.ghosts, ghostHighlight: null }); $('legend-ghost').hidden = false;
+  view.hideCurve = false; spectrum.set({ preview: true, ghosts: run.ghosts, ghostHighlight: null }); $('legend-ghost').hidden = false;
   setStageEntry(`Exploring ${list.length} starting designs in the background…`, 'running');
   $('btn-run').textContent = 'Exploring…'; $('btn-run').disabled = true; $('btn-step').disabled = true;
   $('cycle-label').textContent = 'Exploration';
@@ -720,7 +723,7 @@ function startExploration() {
       run.exploreLabel = null; run.cycle = 0;
       // restore the optimization grid shown on the chart (previews may have enriched their own grids) and switch to the solid synthesis curve
       const pb = buildProblem(); run.problem = { grid: pb.grid, target: pb.target, weights: pb.weights }; run.added = new Set();
-      spectrum.set({ grid: pb.grid, target: pb.target, weights: pb.weights, added: run.added, curveDashed: false });
+      spectrum.set({ grid: pb.grid, target: pb.target, weights: pb.weights, added: run.added, preview: false });
       needle.set({ scan: null, candidate: null, insertion: null, annotations: null, banner: null, stale: false });
       view.hideCurve = false; view.curveDirty = true;
       // replay deterministically: a budget-limited start is replayed with the same amount of work
@@ -754,7 +757,7 @@ function startExploration() {
 function resetRun() {
   run.gen = null; run.running = false; run.paused = false; run.finished = false; run.stepTo = null; run.exploring = false; run.exploreLabel = null;
   if (run.worker) { run.worker.terminate(); run.worker = null; }
-  timerReset(); spectrum.set({ curveDashed: false });
+  timerReset(); spectrum.set({ preview: false });
   unlockSidebar();
   validate();
   setInitialDesign();

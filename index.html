@@ -99,15 +99,16 @@
           <button type="button" data-tab="presets" role="tab" aria-selected="false">Presets</button>
           <button type="button" data-tab="target" role="tab" aria-selected="false">Target</button>
         </div>
+        <span class="header-break" aria-hidden="true"></span>
         <div class="legend" id="spectrum-legend">
-          <span class="legend-item"><i class="swatch target"></i><span id="legend-target-text">Target R̃</span></span>
-          <span class="legend-item" id="legend-target2" hidden title="Target for the p‑polarization (Rs &amp; Rp: each polarization has its own target)"><i class="swatch target2"></i>Target R̃p</span>
-          <span class="legend-item" id="legend-current" title="The target characteristic of the current design"><i class="swatch current"></i><span id="legend-current-text">Current R</span></span>
-          <span class="legend-item" id="legend-rs" hidden title="s‑polarization (E perpendicular to the plane of incidence)"><i class="swatch pol-s"></i>Rs</span>
-          <span class="legend-item" id="legend-rp" hidden title="p‑polarization (E in the plane of incidence)"><i class="swatch pol-p" id="swatch-rp"></i><span id="legend-rp-text">Rp</span></span>
+          <span class="legend-item" title="Target reflectance: a translucent band at the required level, the computed spectra stay visible through it"><i class="swatch target" id="swatch-target"></i><span id="legend-target-text">Target R̃</span></span>
+          <span class="legend-item" id="legend-target2" hidden title="Target for the p‑polarization (Rs &amp; Rp: each polarization has its own target band, Rs tinted blue‑green, Rp tinted magenta with a dashed edge)"><i class="swatch target target2"></i>Target R̃p</span>
+          <span class="legend-item" id="legend-current" title="The target characteristic of the current design"><i class="swatch current" id="swatch-current"></i><span id="legend-current-text">Current R</span></span>
+          <span class="legend-item" id="legend-rs" hidden title="s‑polarization (E perpendicular to the plane of incidence): thin solid blue‑green line"><i class="swatch pol-s"></i>Rs</span>
+          <span class="legend-item" id="legend-rp" hidden title="p‑polarization (E in the plane of incidence): dashed magenta line"><i class="swatch pol-p" id="swatch-rp"></i><span id="legend-rp-text">Rp</span></span>
           <span class="legend-item" title="Optimization grid points on the target; hollow = zero weight, ring = added by grid enrichment"><i class="swatch grid"></i>Points</span>
           <span class="legend-item" id="legend-zone" hidden title="Zero-weight transition zone around a target jump"><i class="swatch zone"></i>Zone</span>
-          <span class="legend-item" id="legend-ghost" hidden title="Multi‑start: the start being explored is dashed blue, finished starts are dashed grey, the leader dashed green"><i class="swatch ghost"></i>Starts</span>
+          <span class="legend-item" id="legend-ghost" hidden title="Multi‑start: the start being explored is the lighter blue line without fill, finished starts are thin grey lines, the leader green; hover the list to highlight a start in orange (Rp always dashed)"><i class="swatch ghost"></i>Starts</span>
         </div>
         <div class="card-tools" id="spectrum-tools">
           <label class="tool" title="Angle of incidence in the incident medium, 0–89.9°"><span>Angle</span><input type="number" id="angle" min="0" max="89.9" step="0.1" inputmode="decimal"><span>°</span></label>
@@ -147,25 +148,11 @@
           <div class="bands" id="bands"></div>
           <div id="bands2-wrap" hidden>
             <h4>Target Rp bands</h4>
-            <p class="hint">The p‑polarization has its own target (dashed on the chart); it shares the spectral range with the Rs target.</p>
+            <p class="hint">The p‑polarization has its own target (the magenta band with a dashed edge on the chart; the Rs band is blue‑green); it shares the spectral range with the Rs target.</p>
             <div class="bands" id="bands2"></div>
           </div>
         </div>
       </div>
-    </article>
-
-    <article class="card" id="card-stats">
-      <header><h3>Synthesis</h3><span class="muted" id="cycle-label">—</span><span class="timer" id="t-elapsed" title="Elapsed synthesis time (pauses with the run)">0:00.0</span><button type="button" class="link" id="btn-starts" hidden>Starts</button></header>
-      <p class="start-label" id="start-label"></p>
-      <div class="result" id="result-line" aria-live="polite"></div>
-      <ol class="starts-list" id="explore-list" hidden></ol>
-      <div class="tiles">
-        <div class="tile"><span class="k">Merit F</span><strong id="t-merit">—</strong><span class="sub" id="t-merit-sub">mean square</span></div>
-        <div class="tile"><span class="k">RMS error</span><strong id="t-rms">—</strong><span class="sub" id="t-maxdev">max —</span></div>
-        <div class="tile"><span class="k">Layers</span><strong id="t-layers">—</strong><span class="sub" id="t-layers-sub">of —</span></div>
-        <div class="tile"><span class="k">Optical thickness</span><strong id="t-tot">—</strong><span class="sub" id="t-tot-sub">of — nm</span></div>
-      </div>
-      <div class="progress"><div class="bar" id="progress-bar"></div></div>
     </article>
 
     <article class="card" id="card-needle">
@@ -180,24 +167,41 @@
       <div class="plot"><canvas id="needle"></canvas><div class="tooltip" id="tt-needle" hidden></div></div>
     </article>
 
+    <article class="card" id="card-structure">
+      <header>
+        <h3>Coating structure <span class="muted"><span id="structure-ambient">substrate → air</span><span class="opt">, bar height ∝ n</span></span></h3>
+        <div class="legend"><span class="legend-item"><i class="swatch mat-h"></i><span id="legend-h">H</span></span><span class="legend-item"><i class="swatch mat-l"></i><span id="legend-l">L</span></span><span class="legend-item"><i class="swatch needle"></i>Changing layer</span></div>
+        <button type="button" class="btn small" id="btn-recipe" title="Every layer of the current design: material, index, thickness, optical thickness, position">Layer table</button>
+      </header>
+      <div class="plot"><canvas id="structure"></canvas><div class="tooltip" id="tt-structure" hidden></div></div>
+    </article>
+  </section>
+
+  <aside class="rail" id="rail">
+    <article class="card" id="card-stats">
+      <header><h3>Synthesis</h3><span class="muted" id="cycle-label">—</span><span class="timer" id="t-elapsed" title="Elapsed synthesis time (pauses with the run)">0:00.0</span><button type="button" class="link" id="btn-starts" hidden>Starts</button></header>
+      <p class="start-label" id="start-label"></p>
+      <div class="result" id="result-line" aria-live="polite"></div>
+      <ol class="starts-list" id="explore-list" hidden></ol>
+      <div class="tiles">
+        <div class="tile"><span class="k">Merit F</span><strong id="t-merit">—</strong><span class="sub" id="t-merit-sub">mean square</span></div>
+        <div class="tile"><span class="k">RMS error</span><strong id="t-rms">—</strong><span class="sub" id="t-maxdev">max —</span></div>
+        <div class="tile"><span class="k">Layers</span><strong id="t-layers">—</strong><span class="sub" id="t-layers-sub">of —</span></div>
+        <div class="tile"><span class="k">Optical thickness</span><strong id="t-tot">—</strong><span class="sub" id="t-tot-sub">of — nm</span></div>
+      </div>
+      <div class="progress"><div class="bar" id="progress-bar"></div></div>
+    </article>
+
     <article class="card" id="card-merit">
       <header><h3>Merit function history</h3><span class="muted">log scale</span></header>
       <div class="plot"><canvas id="merit"></canvas></div>
     </article>
 
-    <article class="card" id="card-structure">
-      <header>
-        <h3>Coating structure <span class="muted"><span id="structure-ambient">substrate → air</span>, bar height ∝ n</span></h3>
-        <div class="legend"><span class="legend-item"><i class="swatch mat-h"></i><span id="legend-h">H</span></span><span class="legend-item"><i class="swatch mat-l"></i><span id="legend-l">L</span></span><span class="legend-item"><i class="swatch needle"></i>Changing layer</span></div>
-      </header>
-      <div class="plot"><canvas id="structure"></canvas><div class="tooltip" id="tt-structure" hidden></div></div>
-    </article>
-
     <article class="card" id="card-log">
-      <header><h3>Event log</h3><button type="button" class="link" id="btn-log-all" hidden>Show all</button><button type="button" class="link" id="btn-recipe" style="margin-left:auto">Layer table</button></header>
+      <header><h3>Event log</h3><button type="button" class="link" id="btn-log-all" hidden>Show all</button></header>
       <ol class="log" id="log"></ol>
     </article>
-  </section>
+  </aside>
 </main>
 
 <dialog id="starts-dialog" class="sheet">
