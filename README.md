@@ -100,6 +100,12 @@ npm run build    # standalone static application in dist/
 
 Serve the files over HTTP (the application uses JavaScript modules).
 
+Release candidates: a branch named `preview/<name>` is verified and
+published at `https://costapop.github.io/MS-Astra/preview/<name>/` next to
+the released application (the list of previews is at
+[/preview/](https://costapop.github.io/MS-Astra/preview/)); deleting the
+branch removes it from the site.
+
 ## Repository
 
 - `src/optics.js` — optical model (incident medium, angle, polarization characteristic), admittance recursion with polarization admittances, adjoint function, analytic Jacobian and needle derivative, needle insertion, thin‑layer cleanup.

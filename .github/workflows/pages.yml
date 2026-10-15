@@ -1,7 +1,15 @@
 name: Deploy application to GitHub Pages
+# The site is built from `main` and deployed to the root of
+# https://costapop.github.io/MS-Astra/. Every branch named `preview/<name>`
+# is built as well and served at https://costapop.github.io/MS-Astra/preview/<name>/,
+# so a release candidate can be tried in the browser without touching the
+# published application. The preview workflow (preview.yml) re-runs this one
+# whenever a preview branch is pushed; deleting a preview branch removes it
+# from the site at the next deployment.
 on:
   push:
     branches: [main]
+  delete:
   workflow_dispatch:
 
 permissions:
@@ -13,10 +21,13 @@ concurrency:
 
 jobs:
   build:
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name != 'delete' || (github.event.ref_type == 'branch' && startsWith(github.event.ref, 'preview/'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -24,13 +35,36 @@ jobs:
         run: npm test
       - name: Build static application
         run: npm run build
+      - name: Add preview branches (preview/<name> → dist/preview/<name>/)
+        run: |
+          set -euo pipefail
+          site="https://costapop.github.io/MS-Astra"
+          list=""
+          for ref in $(git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin/preview/); do
+            name="${ref#preview/}"
+            dir="dist/preview/$name"
+            mkdir -p "$dir"
+            git archive "origin/$ref" index.html styles.css src | tar -x -C "$dir"
+            version=$(git show "origin/$ref:package.json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+            subject=$(git log -1 --format=%s "origin/$ref")
+            date=$(git log -1 --format=%cs "origin/$ref")
+            list="$list<li><a href=\"$site/preview/$name/\">preview/$name</a> — version $version · $date · $subject</li>"
+            echo "preview/$name → $site/preview/$name/ (v$version)"
+          done
+          if [ -n "$list" ]; then
+            mkdir -p dist/preview
+            cat > dist/preview/index.html <<EOF
+          <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MS Astra — preview branches</title>
+          <style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:40px auto;max-width:720px;padding:0 20px;color:#1d1d1f;line-height:1.5}a{color:#0071e3}li{margin:6px 0}</style></head>
+          <body><h1>MS Astra — preview branches</h1><p>Release candidates published from branches named <code>preview/&lt;name&gt;</code>. The released application is at <a href="$site/">$site/</a>.</p><ul>$list</ul></body></html>
+          EOF
+          fi
       - uses: actions/upload-pages-artifact@v4
         with:
           path: dist
 
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       pages: write

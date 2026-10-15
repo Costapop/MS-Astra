@@ -1,0 +1,31 @@
+name: Publish preview branch
+# A branch named `preview/<name>` is verified and then published at
+# https://costapop.github.io/MS-Astra/preview/<name>/ by re-running the Pages
+# deployment of `main` (pages.yml), which builds the released application
+# together with every preview branch. The released application is untouched.
+on:
+  push:
+    branches: ['preview/**']
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Scientific and export verification
+        run: npm test
+      - name: Build standalone application
+        run: npm run build
+      - name: Redeploy GitHub Pages (main + every preview branch)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
+          echo "Preview: https://costapop.github.io/MS-Astra/preview/${GITHUB_REF_NAME#preview/}/ (after the Pages deployment finishes)" >> "$GITHUB_STEP_SUMMARY"
