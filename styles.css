@@ -424,6 +424,8 @@ dialog.sheet header { display: flex; align-items: center; justify-content: space
   .row select { width: 140px; }
   #card-stats, #card-log, #card-multistart { min-height: 200px; }
   #card-stats { max-height: 70vh; }
+  /* needle derivative and coating structure share one screen: half the viewport each, less the sticky top bar and the gap */
+  #card-needle, #card-structure { min-height: 0; height: clamp(160px, calc(50vh - 64px), 300px); }
   #card-multistart { min-height: 160px; max-height: 320px; }
   .topbar { flex-wrap: wrap; }
   .stage-indicator { order: 3; flex-basis: 100%; }

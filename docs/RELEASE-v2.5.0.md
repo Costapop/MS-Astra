@@ -25,6 +25,9 @@ layout keeps the spectrum and the Synthesis card together. Builds on the
   reading order spectrum → Synthesis → Multi‑start → needle derivative →
   coating structure → merit history → event log → inputs, so the spectrum
   and the state of the run are on screen together during a run.
+- In the stacked layout the needle‑derivative and coating‑structure cards
+  take half the window height each (less the top bar and the gap, at most
+  300 px), so the two charts fit on one screen together.
 - **Spectrum header** is tighter (title and tabs, then legend and tools,
   with a 3 px row gap), which gives the plot the height.
 - On short windows the right column scrolls in the multi‑start mode rather
