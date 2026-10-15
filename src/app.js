@@ -9,7 +9,7 @@ import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
 
-export const VERSION = '2.5.0';
+export const VERSION = '2.5.1';
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------------ */

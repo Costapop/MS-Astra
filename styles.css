@@ -124,8 +124,8 @@ a:hover { text-decoration: underline; }
 
 /* ---------- layout: inputs · charts · status ----------
    Three columns. The sidebar holds everything the user enters; the centre
-   column stacks the three charts of the synthesis (spectrum, needle
-   derivative, coating structure) so that all of them stay in view while a run
+   column stacks the three charts of the synthesis (spectrum, coating
+   structure, needle derivative) so that all of them stay in view while a run
    is animated; the right rail holds the state of the run (verdict, tiles),
    the merit history and the event log. The centre column and the rail share
    one row template, so their cards line up row by row. The sidebar folds into
@@ -147,7 +147,7 @@ a:hover { text-decoration: underline; }
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 0.85fr);
 }
-.dashboard { grid-template-areas: "spectrum" "needle" "structure"; }
+.dashboard { grid-template-areas: "spectrum" "structure" "needle"; }   /* three columns: structure under the spectrum, the needle derivative at the bottom (2.5.1) */
 .rail { grid-template-areas: "stats" "merit" "log"; }
 /* multi-start: a fourth card (the starts and their status) under Synthesis */
 .rail.multi { grid-template-rows: minmax(258px, 1fr) minmax(150px, 0.95fr) minmax(150px, 1fr) minmax(90px, 0.6fr); grid-template-areas: "stats" "multistart" "merit" "log"; overflow-y: auto; overflow-x: hidden; }   /* 258 px: header, label, 2 × 2 tiles and the progress bar whole */
