@@ -198,6 +198,7 @@ export function resultWorkbook({ settings, wavelengths, target, weights, R, Rs =
         ['Termination: decisive cause', `${result.summary.headline} — ${result.summary.detail}`],
         ...result.summary.facts.map((f) => [`Stopping condition: ${f.label}`, `${f.hit ? 'holds' : 'does not hold'}${f.decisive ? ' (decisive)' : ''} — ${f.text}`]),
         ['Reported design', result.summary.reported],
+        ...(result.summary.guarantee ? [['Best design', result.summary.guarantee]] : []),
         ['Termination reason self‑check', result.verified == null ? '' : result.verified ? 'passed' : 'FAILED'],
       ] : []),
       ...(result.selection ? [['Design selection', result.selection]] : []),
