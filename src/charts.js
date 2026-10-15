@@ -414,7 +414,9 @@ export class SpectrumChart extends Plot {
 /* ===================================================================== */
 export class NeedleChart extends Plot {
   constructor(canvas, tooltip) {
-    super(canvas, { l: 66, r: 18, t: 16, b: 34 });
+    // the top margin holds a text strip (the candidate label during the run, the verdict banner at the end), so that
+    // neither covers the curve
+    super(canvas, { l: 66, r: 18, t: 34, b: 34 });
     this.tooltip = tooltip;
     this.state = { xmax: 1, layers: [], scan: null, candidate: null, insertion: null, stale: false, Hkey: 'H', Lkey: 'L', annotations: null, banner: null };
     canvas.addEventListener('pointermove', (e) => this.onMove(e));
@@ -471,7 +473,7 @@ export class NeedleChart extends Plot {
       ctx.fillText('The needle derivative appears after the first refinement.', (fr.x0 + fr.x1) / 2, (fr.y0 + fr.y1) / 2);
       return;
     }
-    ctx.save(); ctx.beginPath(); ctx.rect(fr.x0, fr.y0, fr.x1 - fr.x0, fr.y1 - fr.y0); ctx.clip();
+    ctx.save(); ctx.beginPath(); ctx.rect(fr.x0, 0, fr.x1 - fr.x0, fr.y1); ctx.clip();   // the clip includes the text strip above the plot
     ctx.globalAlpha = s.stale ? 0.45 : 1;
     // negative fill + curve coloured by inserted material
     const sc = s.scan;
@@ -516,8 +518,7 @@ export class NeedleChart extends Plot {
     if (s.banner) {
       ctx.font = `600 11px ${T.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
       const tw = ctx.measureText(s.banner).width;
-      let allPos = true; if (s.scan) for (let i = 0; i < s.scan.g.length; i++) if (s.scan.g[i] < 0) { allPos = false; break; }
-      const bx = fr.x0 + SUB_W + 6, bh = 20, by = allPos ? fr.y1 - bh - 4 : fr.y0 + 4, bw = Math.min(tw + 16, fr.x1 - bx - 4);
+      const bx = fr.x0 + 2, bh = 20, by = fr.y0 - bh - 7, bw = Math.min(tw + 16, fr.x1 - bx - 2);   // in the strip above the plot
       ctx.fillStyle = s.bannerKind === 'possible' ? T.needle : T.good; ctx.globalAlpha = 0.14; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 10); ctx.fill(); ctx.globalAlpha = 1;
       ctx.fillStyle = s.bannerKind === 'possible' ? T.needle : T.good;
       ctx.save(); ctx.beginPath(); ctx.rect(bx, by, bw, bh); ctx.clip(); ctx.fillText(s.banner, bx + 8, by + bh / 2); ctx.restore();
@@ -530,12 +531,13 @@ export class NeedleChart extends Plot {
       ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, fr.y0); ctx.lineTo(Math.round(x) + 0.5, fr.y1); ctx.stroke(); ctx.setLineDash([]);
       const pr = 6 + 3 * (c.pulse ?? 0);
       ctx.beginPath(); ctx.arc(x, y, pr, 0, Math.PI * 2); ctx.fillStyle = T.needle; ctx.fill(); ctx.strokeStyle = T.card; ctx.lineWidth = 2; ctx.stroke();
-      ctx.fillStyle = T.ink; ctx.font = `600 11px ${T.font}`; ctx.textBaseline = 'top';
+      // the label sits in the strip above the plot, next to the candidate's vertical line
+      ctx.fillStyle = T.ink; ctx.font = `600 11px ${T.font}`; ctx.textBaseline = 'middle';
       const label = c.label || '';
       const tw = ctx.measureText(label).width;
-      let lx = x + 10; ctx.textAlign = 'left';
-      if (lx + tw > fr.x1) { lx = x - 10; ctx.textAlign = 'right'; }
-      ctx.fillText(label, lx, fr.y0 + 4);
+      let lx = x + 8; ctx.textAlign = 'left';
+      if (lx + tw > fr.x1) { lx = Math.max(fr.x0 + tw + 2, x - 8); ctx.textAlign = 'right'; }
+      ctx.fillText(label, lx, fr.y0 - 17);
       ctx.font = `11px ${T.font}`;
     }
     ctx.restore();

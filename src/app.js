@@ -344,8 +344,7 @@ function setInitialDesign() {
   $('cycle-label').textContent = 'Not started';
   run.ghosts = []; run.starts = []; run.exploreIndex = null; view.hideCurve = false; spectrum.set({ ghosts: [], ghostHighlight: null }); $('legend-ghost').hidden = true;
   resetMultiCard();
-  if (settings.startMode === 'multi') startLabel(`the winner of the explored starting designs is replayed here`, true);
-  else startLabel(`${sm.label} ${settings.startThickness} nm`, false);
+  startLabel(`${sm.label} ${settings.startThickness} nm`, settings.startMode === 'multi');
   $('stage-text').title = '';
   needle.set({ annotations: null, banner: null });
   $('log').innerHTML = ''; run.logExpanded = false; $('btn-log-all').hidden = true;
@@ -409,7 +408,8 @@ function updateCurve(force) {
   spectrum.set({ curve: view.curve });
 }
 
-function startLabel(html, multi) { $('start-label').innerHTML = `<span class="badge${multi ? ' multi' : ''}">${multi ? 'Multi‑start' : 'Single layer'}</span><span>${html}</span>`; }
+/** The starting design whose numbers the tiles describe; in the multi‑start mode the status of the exploration is in the Multi‑start card. */
+function startLabel(html, multi) { $('start-label').innerHTML = `<span class="badge${multi ? ' multi' : ''}" title="${multi ? 'Multi‑start: the starting design shown on the dashboard' : 'The single starting layer'}">${multi ? 'Multi‑start' : 'Single layer'}</span><span title="${html.replace(/"/g, '”')}">${html}</span>`; }
 
 /* ---- Multi‑start card: the starting designs and their status; a merit history per start on the history chart ---- */
 function renderStartsList(names) {
@@ -487,7 +487,7 @@ function applyEvent(ev, snap, opts = {}) {
       const names = { refine: ev.label || 'Refinement', needle: 'Needle search', cleanup: 'Thin‑layer cleanup', growth: 'Thickness growth', final: 'Final optimization' };
       run.stage = names[ev.stage] || ev.stage;
       setStage(`${run.cycle ? `Cycle ${run.cycle} · ` : ''}${run.stage}`, 'running');
-      if (!quiet) $('cycle-label').textContent = run.cycle ? `Cycle ${run.cycle}` : 'Starting';
+      $('cycle-label').textContent = run.cycle ? `Cycle ${run.cycle}` : 'Starting';
       if (ev.stage === 'needle' || ev.stage === 'growth' || ev.stage === 'cleanup' || ev.stage === 'final') { view.highlight = null; view.insertion = null; syncStructure(); needle.set({ insertion: null }); }
       if (ev.stage === 'refine') { view.tauD = 0.08; if (needle.state.scan) needle.set({ stale: true }); }
       break;
@@ -627,8 +627,7 @@ function applyEvent(ev, snap, opts = {}) {
       const rl = $('result-line');
       rl.innerHTML = verdict.html;
       rl.classList.toggle('good', ok);
-      if (settings.startMode === 'multi' && run.exploreRanked) startLabel(`winner «${run.startName}» of ${run.exploreRanked.length} — replayed`, true);
-      else startLabel(`${startMat().label} ${settings.startThickness} nm`, false);
+      startLabel(settings.startMode === 'multi' && run.exploreRanked ? run.startName : `${startMat().label} ${settings.startThickness} nm`, settings.startMode === 'multi' && !!run.exploreRanked);
       if (!quiet) $('card-stats').scrollTop = 0;
       const checks = ev.stop && ev.stop.checks ? ev.stop.checks : [];
       const failed = checks.filter((c) => !c.ok);
@@ -731,10 +730,10 @@ function startExploration() {
       run.exploreLabel = `Start ${ev.index + 1}/${ev.total} «${ev.name}»`; run.cycle = 0;
       run.exploreIndex = ev.index; if (run.starts[ev.index]) run.starts[ev.index].running = true;
       run.dense = null;
-      startLabel(`exploring ${ev.index + 1} of ${ev.total}: ${ev.name}`, true);
+      startLabel(ev.name, true);
       $('multi-label').textContent = `exploring ${ev.index + 1} of ${ev.total} · up to ${settings.exploreBudget} s each`;
       setStageEntry(`${run.exploreLabel} · starting`, 'running');
-      $('cycle-label').textContent = `Exploration ${ev.index + 1}/${ev.total}`;
+      $('cycle-label').textContent = 'Starting';
     } else if (ev.type === 'explore-event') {
       applyEvent(ev.ev, false, { preview: true });
     } else if (ev.type === 'explore-result') {
@@ -761,8 +760,8 @@ function startExploration() {
       const runner = ev.results[1];
       logEntry('explore', `Best starting design by the score max(F, F<sub>dense</sub>): «${best.name}» (score ${fmt.sci(best.score)}, ${best.layers.length} layers)${runner ? `; runner‑up «${runner.name}» ${fmt.sci(runner.score)}` : ''}. Replaying its evolution from the start.`);
       run.startName = best.name; run.exploreRanked = ev.results;
-      startLabel(`winner «${best.name}» (F = ${fmt.sci(best.F)}, ${best.layers.length} layers) replayed from its starting design`, true);
-      $('multi-label').textContent = `${ev.results.length} explored · winner «${best.name}»`;
+      startLabel(best.name, true);
+      $('multi-label').textContent = `${ev.results.length} explored · ★ the winner is replayed`;
       $('btn-starts').hidden = false; run.exploreLabel = null; run.cycle = 0; run.exploreIndex = null;
       run.dense = null; run.history = []; meritChart.set({ history: run.history, starts: run.starts, highlight: null });
       // restore the optimization grid shown on the chart (previews may have enriched their own grids) and switch to the solid synthesis curve

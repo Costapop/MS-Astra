@@ -28,6 +28,18 @@ layout keeps the spectrum and the Synthesis card together. Builds on the
 - In the stacked layout the needle‑derivative and coating‑structure cards
   take half the window height each (less the top bar and the gap, at most
   300 px), so the two charts fit on one screen together.
+- **Needle‑derivative chart.** The verdict banner and the candidate label
+  moved into a text strip above the plot inside the same card (the card
+  keeps its height), so no text covers the curve.
+- **Synthesis card in the multi‑start mode** names only the starting design
+  whose numbers the tiles show (the status of the exploration — which start
+  is running, the winner — is in the Multi‑start card, not repeated), the
+  stage label counts cycles as in a single run, and a long label can no
+  longer climb into the card header (it is cut with an ellipsis, the full
+  text in its tooltip).
+- In the stacked layout the four tiles of the Synthesis card form one
+  compact row, so the spectrum and the Synthesis card share one screen
+  during a run (74 px to spare at 900 × 620).
 - **Spectrum header** is tighter (title and tabs, then legend and tools,
   with a 3 px row gap), which gives the plot the height.
 - On short windows the right column scrolls in the multi‑start mode rather

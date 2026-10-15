@@ -325,8 +325,9 @@ input.switch:checked::after { transform: translateX(16px); }
 .log table.cmp td:first-child, .log table.cmp th:first-child { text-align: left; }
 .log table.cmp tr.chosen td { color: var(--ink); font-weight: 600; }
 #card-stats { overflow: auto; }
-#card-stats .result { flex: none; }
-.start-label { margin: 0 16px 6px; font-size: 12px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; min-height: 18px; }
+#card-stats > * { flex: none; }   /* nothing shrinks: a long label or verdict scrolls instead of climbing into the header */
+.start-label { margin: 0 16px 6px; font-size: 12px; color: var(--ink-2); display: flex; align-items: baseline; gap: 8px; min-height: 18px; line-height: 1.4; }
+.start-label > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .start-label .badge { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; border-radius: 6px; padding: 2px 6px; background: var(--control); color: var(--ink-2); flex: none; }
 .start-label .badge.multi { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 .result .check { color: var(--good); }
@@ -422,15 +423,23 @@ dialog.sheet header { display: flex; align-items: center; justify-content: space
   #card-spectrum { order: 1; } #card-stats { order: 2; } #card-multistart { order: 3; } #card-needle { order: 4; }
   #card-structure { order: 5; } #card-merit { order: 6; } #card-log { order: 7; }
   .row select { width: 140px; }
-  #card-stats, #card-log, #card-multistart { min-height: 200px; }
-  #card-stats { max-height: 70vh; }
+  #card-log, #card-multistart { min-height: 200px; }
+  #card-stats { min-height: 0; max-height: 70vh; }
   /* needle derivative and coating structure share one screen: half the viewport each, less the sticky top bar and the gap */
   #card-needle, #card-structure { min-height: 0; height: clamp(160px, calc(50vh - 64px), 300px); }
+  /* the four tiles in one row, compact, so that the spectrum and the Synthesis card share one screen during a run */
+  .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 2px 16px; }
+  .tile { padding: 6px 10px; gap: 0; border-radius: 10px; }
+  .tile strong { font-size: clamp(14px, 2.2vw, 19px); }
+  .tile .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .progress { margin: 8px 16px 6px; }
+  .start-label { margin-bottom: 4px; }
   #card-multistart { min-height: 160px; max-height: 320px; }
   .topbar { flex-wrap: wrap; }
   .stage-indicator { order: 3; flex-basis: 100%; }
 }
 @media (max-width: 640px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .layout { padding: 10px; }
   .topbar { padding: 10px 12px; }
   .brand { min-width: 0; }
