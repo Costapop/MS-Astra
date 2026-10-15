@@ -11,7 +11,7 @@
  * `refine` is a generator: it yields a frame after every accepted step so the
  * interface can animate the evolution, and returns the final design.
  */
-import { evaluate, totalOpticalThickness } from './optics.js';
+import { evaluate, totalOpticalThickness, asModel } from './optics.js';
 
 function cholSolve(A, b, n) {
   // A: symmetric positive definite (Float64Array n*n), b: Float64Array n. In-place Cholesky.
@@ -42,7 +42,8 @@ function cholSolve(A, b, n) {
 }
 
 export function* refine(layersIn, problem, options = {}) {
-  const { wavelengths, target, weights, ns, na = 1 } = problem;
+  const { wavelengths, target, weights } = problem;
+  const model = problem.model ? asModel(problem.model) : asModel(problem.ns, problem.na ?? 1);
   const maxIter = options.maxIter ?? 300;
   const relTol = options.relTol ?? 1e-12;
   const stepTol = options.stepTol ?? 1e-7;
@@ -51,10 +52,12 @@ export function* refine(layersIn, problem, options = {}) {
   let layers = layersIn.map((L) => ({ ...L }));
   // optical-thickness bound: never exceed the limit, and never get worse if the start is already above it
   const totMax = Math.max(options.totMax ?? Infinity, totalOpticalThickness(layers));
-  const N = layers.length, Lc = wavelengths.length;
-  const sq = Float64Array.from(weights, Math.sqrt);
+  const N = layers.length;
 
-  let cur = evaluate(layers, wavelengths, target, weights, ns, na);
+  // residual rows e_i = √ν (R_i − R̃_i) and their Jacobian come weighted from evaluate
+  // (one row per wavelength, or one per wavelength and polarization for the 'both' characteristic)
+  let cur = evaluate(layers, wavelengths, target, weights, model);
+  const Lc = cur.rows;
   let mu = 1e-3, nu = 2;
   let stall = 0, iter = 0, accepted = 0;
   let reason = 'max iterations';
@@ -70,13 +73,13 @@ export function* refine(layersIn, problem, options = {}) {
     if (nf === 0) { reason = 'all variables at bounds'; break; }
     JtJ.fill(0); Jte.fill(0);
     for (let l = 0; l < Lc; l++) {
-      const e = sq[l] * (cur.R[l] - target[l]);
+      const e = cur.resid[l];
       const row = l * N;
       for (let a = 0; a < nf; a++) {
         const ja = free[a];
-        const Ja = sq[l] * cur.J[row + ja];
+        const Ja = cur.Jw[row + ja];
         Jte[a] += Ja * e;
-        for (let b = 0; b <= a; b++) JtJ[a * nf + b] += Ja * sq[l] * cur.J[row + free[b]];
+        for (let b = 0; b <= a; b++) JtJ[a * nf + b] += Ja * cur.Jw[row + free[b]];
       }
     }
     for (let a = 0; a < nf; a++) for (let b = a + 1; b < nf; b++) JtJ[a * nf + b] = JtJ[b * nf + a];
@@ -113,7 +116,7 @@ export function* refine(layersIn, problem, options = {}) {
         }
         if (totalOpticalThickness(trial) > totMax) { mu *= nu; nu *= 2; continue; }
       }
-      const next = evaluate(trial, wavelengths, target, weights, ns, na);
+      const next = evaluate(trial, wavelengths, target, weights, model);
       // predicted reduction for the gain ratio (Nielsen)
       let pred = 0;
       for (let a = 0; a < nf; a++) {

@@ -28,3 +28,23 @@ test('configuration validation catches inconsistent input', () => {
   assert.equal(validateConfig({ ...ok, startThickness: 1000 }).ok, false);
   assert.equal(validateConfig({ ...ok, bands: [{ R: 1.2 }] }).ok, false);
 });
+
+/* ---------------- v2.3: oblique incidence ---------------- */
+import { AMBIENTS, ambientByKey } from '../src/config.js';
+
+test('incident media, oblique presets and the angle validation', () => {
+  assert.deepEqual(AMBIENTS.map((a) => [a.key, a.n]), [['Air', 1], ['BK7', 1.52]]);
+  assert.equal(ambientByKey('nope').key, 'Air');
+  assert.equal(PRESETS.cube.angle, 45); assert.equal(PRESETS.cube.ambient, 'BK7'); assert.equal(PRESETS.cube.pol, 'avg');
+  assert.equal(PRESETS.ar45.pol, 'both'); assert.equal(PRESETS.mirror.angle, undefined);
+  const ok = { lambdaMin: 400, lambdaMax: 700, points: 61, H: { n: 2.45 }, L: { n: 1.38 }, maxLayers: 12, maxTOT: 1500, targetMerit: 1e-6, startThickness: 100, startMaterial: { n: 2.45 }, thinLayer: 1, bands: [{ R: 0 }], substrate: { n: 1.52 }, ambient: { n: 1 } };
+  assert.equal(validateConfig({ ...ok, angle: 89.9, pol: 'p' }).ok, true);
+  assert.equal(validateConfig({ ...ok, angle: 90 }).ok, false);
+  assert.equal(validateConfig({ ...ok, angle: -1 }).ok, false);
+  assert.equal(validateConfig({ ...ok, pol: 'x' }).ok, false);
+  // evanescent layers are allowed (MgF2 from BK7 beyond 65.2°) …
+  assert.equal(validateConfig({ ...ok, angle: 80, ambient: { n: 1.52 } }).ok, true);
+  // … but total internal reflection at the substrate is not
+  const tir = validateConfig({ ...ok, angle: 60, ambient: { n: 1.52 }, substrate: { n: 1.0 } });
+  assert.equal(tir.ok, false); assert.match(tir.errors.join(' '), /Total internal reflection at the substrate/);
+});

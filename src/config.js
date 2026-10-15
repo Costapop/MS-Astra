@@ -17,23 +17,41 @@ export const SUBSTRATES = [
   { key: 'BK7', label: 'BK7', n: 1.52 },
 ];
 
+/** Incident (ambient) media the light comes from; the angle of incidence is measured in this medium. */
+export const AMBIENTS = [
+  { key: 'Air', label: 'Air', n: 1.0 },
+  { key: 'BK7', label: 'BK7', n: 1.52 },
+];
+
 export function materialByKey(key) {
   return LAYER_MATERIALS.find((m) => m.key === key) || SUBSTRATES.find((m) => m.key === key);
 }
+export function ambientByKey(key) {
+  return AMBIENTS.find((m) => m.key === key) || AMBIENTS[0];
+}
 
-/** Target presets: bands as fractions of the spectral interval. */
+/**
+ * Target presets: bands as fractions of the spectral interval. `angle` (degrees),
+ * `pol` (s | p | both | avg) and `ambient` (Air | BK7) default to normal
+ * incidence of unpolarized light from air.
+ */
 export const PRESETS = {
   mirror: { name: 'Mirror 95 %', range: [450, 650], bands: [{ t: 1, R: 0.95 }], H: 'Ta2O5', L: 'SiO2', start: { material: 'Ta2O5', thickness: 100 }, maxLayers: 30, maxTOT: 5000, merit: 1e-4 },
   ar: { name: 'Anti‑reflection', range: [400, 700], bands: [{ t: 1, R: 0 }], H: 'TiO2', L: 'MgF2', start: { material: 'TiO2', thickness: 100 }, maxLayers: 12, maxTOT: 1500, merit: 1e-6 },
   edge: { name: 'Edge filter', range: [400, 800], bands: [{ t: 0.5, R: 0.02 }, { t: 1, R: 0.95 }], H: 'TiO2', L: 'MgF2', start: { material: 'TiO2', thickness: 150 }, maxLayers: 40, maxTOT: 6000, merit: 1e-4 },
   bandpass: { name: 'Band reflector', range: [400, 800], bands: [{ t: 0.3, R: 0.02 }, { t: 0.7, R: 0.95 }, { t: 1, R: 0.02 }], H: 'TiO2', L: 'SiO2', start: { material: 'TiO2', thickness: 150 }, maxLayers: 40, maxTOT: 6000, merit: 1e-4 },
   splitter: { name: 'Beam splitter 50 %', range: [450, 650], bands: [{ t: 1, R: 0.5 }], H: 'Ta2O5', L: 'SiO2', start: { material: 'Ta2O5', thickness: 100 }, maxLayers: 20, maxTOT: 3000, merit: 1e-5 },
+  cube: { name: 'Cube splitter 45°', range: [450, 650], bands: [{ t: 1, R: 0.5 }], H: 'Ta2O5', L: 'SiO2', start: { material: 'Ta2O5', thickness: 100 }, maxLayers: 24, maxTOT: 4000, merit: 1e-4, angle: 45, pol: 'avg', ambient: 'BK7' },
+  ar45: { name: 'AR at 45°', range: [450, 650], bands: [{ t: 1, R: 0 }], H: 'TiO2', L: 'MgF2', start: { material: 'TiO2', thickness: 100 }, maxLayers: 14, maxTOT: 1800, merit: 3e-5, angle: 45, pol: 'both', ambient: 'Air' },
 };
 
 export const DEFAULTS = {
   preset: 'mirror',
   points: 61,
   substrate: 'BK7',
+  ambient: 'Air',
+  angle: 0,
+  pol: 'avg',
   thinLayer: 1,
   needleWidth: 10,
   candidates: 3,
@@ -124,5 +142,10 @@ export function validateConfig(c) {
     if (c.transition >= span / 2) errors.push('Transition zone is too wide for the spectral range.');
   }
   for (const b of c.bands || []) if (!(b.R >= 0 && b.R <= 1)) errors.push('Target reflectance must be between 0 and 1.');
+  const angle = c.angle ?? 0;
+  if (!(angle >= 0 && angle <= 89.9)) errors.push('Angle of incidence must be from 0 to 89.9 degrees.');
+  if (c.pol != null && !['s', 'p', 'both', 'avg'].includes(c.pol)) errors.push('Choose the target characteristic: Rs, Rp, Rs & Rp or (Rs + Rp)/2.');
+  const na = c.ambient?.n ?? 1, ns = c.substrate?.n;
+  if (ns && angle >= 0 && angle <= 89.9 && na * Math.sin(angle * Math.PI / 180) >= ns) errors.push(`Total internal reflection at the substrate (n_a sin θ ≥ n_s): the reflectance is 1 for every design. Reduce the angle below ${(Math.asin(Math.min(1, ns / na)) * 180 / Math.PI).toFixed(1)}°.`);
   return { ok: errors.length === 0, errors };
 }

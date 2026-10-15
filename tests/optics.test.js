@@ -143,3 +143,175 @@ test('insertNeedle preserves total thickness; cleanThinLayers keeps optical thic
   assert.ok(Math.abs(cl[0].d - (160 + 0.5 * 1.38 / 2.30)) < 1e-12);
   assert.ok(Math.abs(totalOpticalThickness(cl) - totalOpticalThickness([H(100), L(0.5), H(60)])) < 1e-12);
 });
+
+/* ---------------- v2.3: oblique incidence, s/p polarizations, incident medium ---------------- */
+import { spectra, assess, meritOf, opticsModel, polParams } from '../src/optics.js';
+
+// complex helpers for the independent reference
+const C = {
+  mul: (x, y) => [x[0] * y[0] - x[1] * y[1], x[0] * y[1] + x[1] * y[0]],
+  add: (x, y) => [x[0] + y[0], x[1] + y[1]],
+  sub: (x, y) => [x[0] - y[0], x[1] - y[1]],
+  div: (x, y) => { const d = y[0] * y[0] + y[1] * y[1]; return [(x[0] * y[0] + x[1] * y[1]) / d, (x[1] * y[0] - x[0] * y[1]) / d]; },
+  abs2: (x) => x[0] * x[0] + x[1] * x[1],
+  cos: (z) => [Math.cos(z[0]) * Math.cosh(z[1]), -Math.sin(z[0]) * Math.sinh(z[1])],
+  sin: (z) => [Math.sin(z[0]) * Math.cosh(z[1]), Math.cos(z[0]) * Math.sinh(z[1])],
+  sqrtBranch: (x) => (x >= 0 ? [Math.sqrt(x), 0] : [0, -Math.sqrt(-x)]),   // Re ≥ 0, Im ≤ 0 (decaying transmitted wave)
+};
+/**
+ * Independent reference: Abelès characteristic matrices at oblique incidence
+ * (Furman–Tikhonravov §1.2.1, Table 1.1): φ_j = k n_j cos γ_j d_j,
+ * q_j = n_j cos γ_j (s) or n_j / cos γ_j (p), r and t from eq. (1.2.13–1.2.14),
+ * R = |r|², T = Re(q_s)/q_a |t|² (eq. 1.1.23). Complex arithmetic throughout.
+ */
+function referenceRT(layers, lambda, { ns, na, angle }, pol) {
+  const th = angle * Math.PI / 180, alpha = na * Math.sin(th);
+  const q = (n) => { const b = C.sqrtBranch(n * n - alpha * alpha); return pol === 's' ? b : C.div([n * n, 0], b); };
+  const beta = (n) => C.sqrtBranch(n * n - alpha * alpha);
+  let M = [[1, 0], [0, 0], [0, 0], [1, 0]];
+  const mul = (A, B) => [C.add(C.mul(A[0], B[0]), C.mul(A[1], B[2])), C.add(C.mul(A[0], B[1]), C.mul(A[1], B[3])), C.add(C.mul(A[2], B[0]), C.mul(A[3], B[2])), C.add(C.mul(A[2], B[1]), C.mul(A[3], B[3]))];
+  const k = 2 * Math.PI / lambda;
+  for (const Lr of layers) {
+    const b = beta(Lr.n), qj = q(Lr.n);
+    const phi = [k * b[0] * Lr.d, k * b[1] * Lr.d];
+    const c = C.cos(phi), s = C.sin(phi);
+    const Mj = [c, C.div(C.mul([0, 1], s), qj), C.mul([0, 1], C.mul(qj, s)), c];
+    M = mul(Mj, M);
+  }
+  const qs = q(ns), qa = pol === 's' ? [na * Math.cos(th), 0] : [na / Math.cos(th), 0];
+  const U = C.add(M[0], C.mul(qs, M[1])), V = C.add(M[2], C.mul(qs, M[3]));
+  const den = C.add(C.mul(qa, U), V);
+  const r = C.div(C.sub(C.mul(qa, U), V), den), t = C.div([2 * qa[0], 0], den);
+  return { R: C.abs2(r), T: qs[0] / qa[0] * C.abs2(t) };
+}
+
+test('oblique incidence: bare substrate reproduces the Fresnel formulas and the Brewster angle', () => {
+  const ns = 1.52;
+  for (const [na, th] of [[1, 30], [1, 60], [1, 85], [1.52, 20], [1.52, 45]]) {
+    const g = th * Math.PI / 180, cs = Math.sqrt(1 - (na * Math.sin(g) / ns) ** 2);
+    const rs = (na * Math.cos(g) - ns * cs) / (na * Math.cos(g) + ns * cs);
+    const rp = (na * cs - ns * Math.cos(g)) / (na * cs + ns * Math.cos(g));
+    const sp = spectra([], [550], opticsModel({ ns, na, angle: th, pol: 'avg' }));
+    assert.ok(Math.abs(sp.Rs[0] - rs * rs) < 1e-15 && Math.abs(sp.Rp[0] - rp * rp) < 1e-15, `θ=${th} from ${na}`);
+    assert.ok(Math.abs(sp.R[0] - 0.5 * (rs * rs + rp * rp)) < 1e-15);
+  }
+  const brewster = Math.atan(ns) * 180 / Math.PI;
+  const sp = spectra([], [550], opticsModel({ ns, na: 1, angle: brewster, pol: 'p' }));
+  assert.ok(sp.Rp[0] < 1e-28 && sp.Rs[0] > 0.1, `Brewster: Rp=${sp.Rp[0]}`);
+  // at normal incidence s and p coincide with the book formula and with the legacy call
+  const m0 = spectra([L(99.6), H(56)], [500, 600], opticsModel({ ns, na: 1, angle: 0, pol: 'both' }));
+  const legacy = reflectance([L(99.6), H(56)], [500, 600], ns);
+  for (let i = 0; i < 2; i++) assert.ok(m0.Rs[i] === m0.Rp[i] && m0.R[i] === legacy[i]);
+});
+
+test('oblique incidence: admittance recursion with polarization admittances agrees with the Abelès reference (air and BK7 incidence, evanescent layers) and conserves energy', () => {
+  let seed = 777; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const cases = [{ na: 1, angle: 15 }, { na: 1, angle: 45 }, { na: 1, angle: 75 }, { na: 1, angle: 89.9 }, { na: 1.52, angle: 30 }, { na: 1.52, angle: 70 }, { na: 1.52, angle: 89 }];
+  let evanescent = 0;
+  for (const cs of cases) for (let t = 0; t < 6; t++) {
+    const N = 1 + Math.floor(rnd() * 14);
+    const layers = Array.from({ length: N }, (_, i) => (i % 2 ? L(5 + rnd() * 250) : H(5 + rnd() * 250)));
+    const wl = grid(400, 900, 11);
+    const model = opticsModel({ ns: 1.52, na: cs.na, angle: cs.angle, pol: 'avg' });
+    if (model.alpha > 1.38) evanescent++;
+    const sp = spectra(layers, wl, model);
+    for (let i = 0; i < wl.length; i++) {
+      const s = referenceRT(layers, wl[i], { ns: 1.52, ...cs }, 's'), p = referenceRT(layers, wl[i], { ns: 1.52, ...cs }, 'p');
+      assert.ok(Math.abs(sp.Rs[i] - s.R) < 1e-11, `s: N=${N} ${JSON.stringify(cs)} λ=${wl[i]}: ${sp.Rs[i]} vs ${s.R}`);
+      assert.ok(Math.abs(sp.Rp[i] - p.R) < 1e-11, `p: N=${N} ${JSON.stringify(cs)} λ=${wl[i]}: ${sp.Rp[i]} vs ${p.R}`);
+      assert.ok(Math.abs(s.R + s.T - 1) < 1e-10 && Math.abs(p.R + p.T - 1) < 1e-10, 'lossless: R + T = 1');
+      assert.ok(sp.Rs[i] >= 0 && sp.Rs[i] <= 1 + 1e-12 && sp.Rp[i] >= 0 && sp.Rp[i] <= 1 + 1e-12);
+    }
+  }
+  assert.ok(evanescent >= 12, 'cases with evanescent low-index layers were exercised');
+  // total internal reflection at the substrate: R ≡ 1 for any lossless stack
+  const tir = opticsModel({ ns: 1.0, na: 1.52, angle: 60, pol: 'both' });
+  assert.ok(tir.substrateTIR);
+  const sp = spectra([H(80), L(120), H(30)], [500, 700], tir);
+  for (let i = 0; i < 2; i++) assert.ok(Math.abs(sp.Rs[i] - 1) < 1e-12 && Math.abs(sp.Rp[i] - 1) < 1e-12);
+});
+
+test('oblique incidence: gradient, Jacobian and residual rows match finite differences for Rs, Rp, the unpolarized mean and both polarizations', () => {
+  const layers = [H(74), L(103), H(131), L(88), H(40), L(210)];
+  const wl = grid(420, 800, 25); const target = new Float64Array(25).fill(0.3); const w = meritWeights(25);
+  for (const spec of [{ na: 1, angle: 45, pol: 's' }, { na: 1, angle: 45, pol: 'p' }, { na: 1, angle: 60, pol: 'avg' }, { na: 1, angle: 30, pol: 'both' }, { na: 1.52, angle: 70, pol: 'avg' }, { na: 1.52, angle: 72, pol: 'both' }]) {
+    const model = opticsModel({ ns: 1.52, ...spec });
+    const ev = evaluate(layers, wl, target, w, model);
+    // F from the evaluation equals the independent assessment and Σ resid²
+    const a = assess(layers, wl, target, w, model);
+    assert.ok(Math.abs(ev.F - a.F) < 1e-15 && Math.abs(meritOf(layers, wl, target, w, model) - a.F) < 1e-15, `${JSON.stringify(spec)}: F`);
+    let sum = 0; for (let i = 0; i < ev.rows; i++) sum += ev.resid[i] * ev.resid[i];
+    assert.ok(Math.abs(sum - ev.F) < 1e-15, 'F = Σ resid²');
+    assert.equal(ev.rows, spec.pol === 'both' ? 2 * wl.length : wl.length);
+    if (spec.pol === 'both') {
+      let Fb = 0; for (let l = 0; l < wl.length; l++) Fb += 0.5 * w[l] * ((a.Rs[l] - target[l]) ** 2 + (a.Rp[l] - target[l]) ** 2);
+      assert.ok(Math.abs(Fb - ev.F) < 1e-15, 'both: F = ½ Σ ν [(Rs − R̃)² + (Rp − R̃)²]');
+    }
+    for (let j = 0; j < layers.length; j++) {
+      const h = 1e-4;
+      const lp = layers.map((x, i) => ({ ...x, d: x.d + (i === j ? h : 0) })), lm = layers.map((x, i) => ({ ...x, d: x.d - (i === j ? h : 0) }));
+      const fd = (meritOf(lp, wl, target, w, model) - meritOf(lm, wl, target, w, model)) / (2 * h);
+      assert.ok(Math.abs(ev.grad[j] - fd) < 1e-7 * Math.max(1, Math.abs(fd)) + 1e-11, `${JSON.stringify(spec)} layer ${j}: ${ev.grad[j]} vs ${fd}`);
+      // gradient from the weighted rows: 2 Jwᵀ resid
+      let g2 = 0; for (let i = 0; i < ev.rows; i++) g2 += 2 * ev.Jw[i * layers.length + j] * ev.resid[i];
+      assert.ok(Math.abs(g2 - ev.grad[j]) < 1e-12 * Math.max(1, Math.abs(ev.grad[j])), 'grad = 2 Jwᵀ e');
+      // Jacobian of the displayed characteristic (mean for both)
+      const Rp_ = spectra(lp, wl, model).R, Rm_ = spectra(lm, wl, model).R;
+      for (let l = 0; l < wl.length; l += 6) {
+        const fdR = (Rp_[l] - Rm_[l]) / (2 * h);
+        assert.ok(Math.abs(ev.J[l * layers.length + j] - fdR) < 1e-6, `J[${l},${j}] ${ev.J[l * layers.length + j]} vs ${fdR}`);
+      }
+    }
+  }
+});
+
+test('oblique incidence: needle derivative for s, p, mean and both matches the finite-width merit change (including an evanescent host)', () => {
+  const wl = grid(420, 800, 31); const target = new Float64Array(31).fill(0.2); const w = meritWeights(31);
+  const layers = [H(95.3778), L(65.2239), H(145.7781), L(105.6838)];
+  for (const spec of [{ na: 1, angle: 45, pol: 's' }, { na: 1, angle: 45, pol: 'p' }, { na: 1, angle: 55, pol: 'avg' }, { na: 1, angle: 35, pol: 'both' }, { na: 1.52, angle: 70, pol: 'avg' }, { na: 1.52, angle: 70, pol: 'p' }]) {
+    const model = opticsModel({ ns: 1.52, ...spec });
+    const ev = evaluate(layers, wl, target, w, model, true);
+    const F0 = ev.F;
+    let checked = 0;
+    for (const [j, x] of [[2, 117.2], [1, 31.9], [0, 70.9], [3, 29.2]]) {
+      const nm = layers[j].m === 'H' ? 1.38 : 2.30;
+      const g = needleDerivative(layers, ev.adjoint, j, x, nm);
+      const eta = 5e-4;
+      const Fi = meritOf(insertNeedle(layers, { layer: j, x, z: 0, kind: 'interior' }, eta, { n: nm, m: nm > 2 ? 'H' : 'L' }), wl, target, w, model);
+      const fd = (Fi - F0) / eta;
+      if (Math.abs(g) < 1e-9) continue;
+      assert.ok(Math.abs(fd - g) < 3e-3 * Math.abs(g), `${JSON.stringify(spec)} layer ${j}: ${fd} vs ${g}`);
+      checked++;
+    }
+    assert.ok(checked >= 3, 'enough non-trivial points');
+    // the p-polarization derivative depends on A(z): it is not P(z)·(n_m² − n_h²) at oblique incidence
+    if (spec.pol === 'p' && spec.na === 1.52) {
+      const ps = polParams(1.38, model, 'p'), ph = polParams(2.30, model, 'p');
+      assert.ok(ps.kind === 1 && ph.kind === 0, 'MgF₂ is evanescent, the host is propagating');
+      assert.ok(ps.a !== ph.a, 'Δa ≠ 0 for p');
+    }
+  }
+});
+
+test('oblique incidence: scanNeedles and the refinement work on the generalized derivatives (45°, unpolarized, from BK7 at 70°)', () => {
+  const wl = grid(450, 650, 21); const target = new Float64Array(21).fill(0.5); const w = meritWeights(21);
+  for (const spec of [{ na: 1, angle: 45, pol: 'avg' }, { na: 1.52, angle: 45, pol: 'both' }, { na: 1.52, angle: 70, pol: 'avg' }]) {
+    const model = opticsModel({ ns: 1.52, ...spec });
+    const problem = { wavelengths: wl, target, weights: w, model };
+    const start = [{ n: 2.10, m: 'H', d: 120 }, { n: 1.46, m: 'L', d: 90 }, { n: 2.10, m: 'H', d: 60 }];
+    const r = refineToEnd(start, problem, { maxIter: 500 });
+    assert.ok(r.F < meritOf(start, wl, target, w, model), 'refinement lowers F');
+    assert.ok(Math.abs(r.F - meritOf(r.layers, wl, target, w, model)) < 1e-15);
+    const ev = evaluate(r.layers, wl, target, w, model, true);
+    assert.ok(Math.abs(ev.F - r.F) < 1e-15);
+    const scan = scanNeedles(r.layers, ev.adjoint, wl, (Lr) => (Lr.m === 'H' ? 1.46 : 2.10));
+    assert.ok(scan.z.length >= 80 && scan.g.length === scan.z.length);
+    for (const c of scan.candidates) {
+      assert.ok(c.g < 0);
+      if (c.kind !== 'interior') continue;
+      const mat = c.nm > 2 ? { n: 2.10, m: 'H' } : { n: 1.46, m: 'L' };
+      const Fi = meritOf(insertNeedle(r.layers, c, 1e-3, mat), wl, target, w, model);
+      assert.ok(Fi < r.F, `a negative needle derivative lowers F for a thin needle (${JSON.stringify(spec)})`);
+    }
+  }
+});

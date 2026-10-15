@@ -3,13 +3,13 @@
  * runner with demonstration pacing and animation, multi‑start exploration in
  * a background worker, dashboard updates, export.
  */
-import { LAYER_MATERIALS, SUBSTRATES, PRESETS, DEFAULTS, materialByKey, uniformGrid, sampleTarget, bandsFromPreset, validateConfig } from './config.js';
-import { reflectance, merit, totalOpticalThickness } from './optics.js';
+import { LAYER_MATERIALS, SUBSTRATES, AMBIENTS, PRESETS, DEFAULTS, materialByKey, ambientByKey, uniformGrid, sampleTarget, bandsFromPreset, validateConfig } from './config.js';
+import { reflectance, spectra, meritOf, opticsModel, totalOpticalThickness, POLARIZATIONS, polarizationLabel } from './optics.js';
 import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
 
-export const VERSION = '2.2.2';
+export const VERSION = '2.3.0';
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------------ */
@@ -20,7 +20,8 @@ const settings = {
   lambdaMin: 450, lambdaMax: 650, points: DEFAULTS.points,
   bands: [{ from: 450, to: 650, R: 0.95 }],
   transition: DEFAULTS.transition,
-  H: 'Ta2O5', L: 'SiO2', substrate: DEFAULTS.substrate,
+  H: 'Ta2O5', L: 'SiO2', substrate: DEFAULTS.substrate, ambient: DEFAULTS.ambient,
+  angle: DEFAULTS.angle, pol: DEFAULTS.pol,
   startMode: DEFAULTS.multiStart ? 'multi' : 'single', startMaterial: 'H', startThickness: 100, exploreBudget: DEFAULTS.exploreBudget,
   maxLayers: 30, maxTOT: 5000, targetMerit: 1e-4,
   thinLayer: DEFAULTS.thinLayer, needleWidth: DEFAULTS.needleWidth, candidates: DEFAULTS.candidates,
@@ -34,6 +35,7 @@ function applyPreset(key) {
   settings.bands = bandsFromPreset(p);
   settings.transition = p.transition ?? 0;
   settings.H = p.H; settings.L = p.L;
+  settings.angle = p.angle ?? 0; settings.pol = p.pol ?? 'avg'; settings.ambient = p.ambient ?? 'Air';
   settings.startMaterial = p.start.material === p.H ? 'H' : 'L';
   settings.startThickness = p.start.thickness;
   settings.maxLayers = p.maxLayers; settings.maxTOT = p.maxTOT; settings.targetMerit = p.merit;
@@ -42,6 +44,14 @@ function applyPreset(key) {
 function materialH() { return materialByKey(settings.H); }
 function materialL() { return materialByKey(settings.L); }
 function substrate() { return materialByKey(settings.substrate); }
+function ambient() { return ambientByKey(settings.ambient); }
+/** Optical model of the current task: substrate, incident medium, angle of incidence, target characteristic. */
+function model() { return opticsModel({ ns: substrate().n, na: ambient().n, angle: settings.angle, pol: settings.pol }); }
+const oblique = () => settings.angle > 0;
+/** Label of the characteristic drawn as the main curve ((Rs+Rp)/2 is displayed for 'both'). */
+function charLabel() { return !oblique() ? 'R' : settings.pol === 'both' ? '(Rs + Rp)/2' : polarizationLabel(settings.pol); }
+function incidenceText() { return oblique() ? `${settings.angle}° from ${ambient().label} (${ambient().n.toFixed(2)}) · target ${polarizationLabel(settings.pol)}` : `normal, from ${ambient().label} (${ambient().n.toFixed(2)})`; }
+function ambientSide() { return settings.ambient === 'Air' ? 'air side' : `${ambient().label} side`; }
 function startMat() { return settings.startMaterial === 'H' ? materialH() : materialL(); }
 const lambdaCenter = () => (settings.lambdaMin + settings.lambdaMax) / 2;
 
@@ -55,7 +65,7 @@ function engineConfig() {
   const { grid, target, weights } = buildProblem();
   const H = { n: materialH().n, m: materialH().key }, L = { n: materialL().n, m: materialL().key };
   return {
-    wavelengths: grid, target, weights, ns: substrate().n, na: 1,
+    wavelengths: grid, target, weights, ns: substrate().n, na: ambient().n, angle: settings.angle, pol: settings.pol,
     bands: settings.bands.map((b) => ({ ...b })), transition: settings.transition,
     materials: { H, L },
     start: { material: startMat().key, thickness: settings.startThickness },
@@ -124,6 +134,9 @@ function syncForm() {
   $('lambda-min').value = settings.lambdaMin; $('lambda-max').value = settings.lambdaMax; $('points').value = settings.points;
   $('transition').value = settings.transition;
   fillSelect($('mat-h'), LAYER_MATERIALS, settings.H); fillSelect($('mat-l'), LAYER_MATERIALS, settings.L); fillSelect($('substrate'), SUBSTRATES, settings.substrate);
+  fillSelect($('ambient'), AMBIENTS, settings.ambient);
+  for (const id of ['angle', 'angle-tab']) $(id).value = settings.angle;
+  for (const id of ['pol', 'pol-tab']) { const sel = $(id); sel.innerHTML = ''; for (const o of POLARIZATIONS) { const e = document.createElement('option'); e.value = o.key; e.textContent = o.label; e.title = o.title; sel.appendChild(e); } sel.value = settings.pol; }
   for (const b of $('start-material').querySelectorAll('button')) { const on = b.dataset.start === settings.startMaterial; b.classList.toggle('active', on); b.setAttribute('aria-checked', on); }
   $('multi-start').checked = settings.startMode === 'multi';
   $('start-thickness').value = settings.startThickness;
@@ -133,7 +146,24 @@ function syncForm() {
   $('thin-layer').value = settings.thinLayer; $('needle-width').value = settings.needleWidth; $('candidates').value = settings.candidates;
   $('dense-check').checked = settings.denseCheck; $('enrich-grid').checked = settings.enrichGrid; $('enrich-grid').disabled = !settings.denseCheck;
   $('legend-zone').hidden = !(settings.transition > 0 && settings.bands.length > 1);
-  renderPresets(); renderBands(); updateMeritHint(); updateLegendMaterials(); updateStartHint(); renderPresetSummary();
+  renderPresets(); renderBands(); updateMeritHint(); updateLegendMaterials(); updateIncidence(); updateStartHint(); renderPresetSummary();
+}
+
+/** Hints, legend and chart labels that depend on the angle, the characteristic and the incident medium. */
+function updateIncidence() {
+  const M = model();
+  const al = M.alpha;
+  const evan = [materialH(), materialL()].filter((m) => al >= m.n).map((m) => m.label);
+  $('model-hint').textContent = `Isotropic, homogeneous, lossless, non‑dispersive layers; semi‑infinite substrate; ${oblique() ? `incidence at ${settings.angle}° from ${ambient().label} (n = ${ambient().n.toFixed(2)})` : `normal incidence from ${ambient().label} (n = ${ambient().n.toFixed(2)})`}.`;
+  $('incidence-hint').innerHTML = oblique()
+    ? `Plane wave from ${ambient().label} (n = ${ambient().n.toFixed(2)}, chosen in the sidebar) at ${settings.angle}°: α = n<sub>a</sub> sin θ = ${al.toFixed(3)}. s and p polarizations are computed with the polarization admittances q = n cos γ (s) and n / cos γ (p); ${settings.pol === 'avg' ? 'the target applies to the unpolarized reflectance (Rs + Rp)/2' : settings.pol === 'both' ? 'the target applies to Rs and to Rp at once: F = ½⟨(Rs − R̃)² + (Rp − R̃)²⟩' : `the target applies to ${polarizationLabel(settings.pol)} only`}.${evan.length ? ` ${evan.join(' and ')} layers are evanescent at this angle (α ≥ n): frustrated total internal reflection, handled exactly.` : ''}`
+    : `Normal incidence from ${ambient().label} (n = ${ambient().n.toFixed(2)}): Rs = Rp = R. Set an angle to design for oblique incidence; the target characteristic then chooses Rs, Rp, both or the unpolarized mean.`;
+  $('legend-current-text').textContent = `Current ${charLabel()}`;
+  // the other polarization(s) as thin lines: both for the mean / both characteristics, the complementary one for Rs or Rp
+  $('legend-rs').hidden = !oblique() || settings.pol === 's'; $('legend-rp').hidden = !oblique() || settings.pol === 'p';
+  spectrum.set({ showPols: oblique(), showRs: settings.pol !== 's', showRp: settings.pol !== 'p', charLabel: charLabel() });
+  $('structure-ambient').textContent = `substrate → ${settings.ambient === 'Air' ? 'air' : ambient().label}`;
+  structure.set({ ambient: settings.ambient === 'Air' ? 'air' : ambient().label, na: ambient().n });
 }
 
 function updateMeritHint() {
@@ -157,6 +187,7 @@ function renderPresetSummary() {
     ['Spectral range', `${settings.lambdaMin}–${settings.lambdaMax} nm · ${settings.points} points${settings.transition ? ` · transition zone ${settings.transition} nm` : ''}`],
     ['Target bands', settings.bands.map((b) => `${Math.round(b.from)}–${Math.round(b.to)} nm: R = ${(100 * b.R).toFixed(1)} %`).join('; ')],
     ['Materials', `H = ${H.label} (${H.n.toFixed(2)}), L = ${L.label} (${L.n.toFixed(2)}), substrate ${substrate().label} (${substrate().n.toFixed(2)})`],
+    ['Incidence', incidenceText()],
     ['Starting design', settings.startMode === 'multi' ? `multi‑start (10 designs, ${settings.exploreBudget} s each)` : `${startMat().label} ${settings.startThickness} nm`],
     ['Limits', `${settings.maxLayers} layers · ${settings.maxTOT} nm optical thickness · target F ${settings.targetMerit.toExponential(0)}`],
   ];
@@ -180,6 +211,9 @@ function bindForm() {
   $('mat-h').addEventListener('change', () => { settings.H = $('mat-h').value; onSettingsChanged(); });
   $('mat-l').addEventListener('change', () => { settings.L = $('mat-l').value; onSettingsChanged(); });
   $('substrate').addEventListener('change', () => { settings.substrate = $('substrate').value; onSettingsChanged(); });
+  $('ambient').addEventListener('change', () => { settings.ambient = $('ambient').value; onSettingsChanged(); });
+  for (const id of ['angle', 'angle-tab']) $(id).addEventListener('change', () => { const v = Number($(id).value); settings.angle = Number.isFinite(v) ? Math.max(0, Math.min(89.9, Math.round(v * 10) / 10)) : 0; onSettingsChanged(); });
+  for (const id of ['pol', 'pol-tab']) $(id).addEventListener('change', () => { settings.pol = $(id).value; onSettingsChanged(); });
   for (const b of $('start-material').querySelectorAll('button')) b.addEventListener('click', () => { settings.startMaterial = b.dataset.start; onSettingsChanged(); });
   $('multi-start').addEventListener('change', () => { settings.startMode = $('multi-start').checked ? 'multi' : 'single'; onSettingsChanged(); });
   num('start-thickness', 'startThickness');
@@ -202,7 +236,7 @@ function onSettingsChanged() {
 }
 
 function validate() {
-  const c = { ...settings, H: materialH(), L: materialL(), startMaterial: startMat() };
+  const c = { ...settings, H: materialH(), L: materialL(), startMaterial: startMat(), substrate: substrate(), ambient: ambient() };
   const v = validateConfig(c);
   const box = $('errors'); box.hidden = v.ok; box.innerHTML = v.errors.map((e) => `<div>${e}</div>`).join('');
   $('btn-run').disabled = !v.ok;
@@ -258,7 +292,7 @@ function setInitialDesign() {
   run.added = new Set(); run.dense = null; run.startName = null; run.exploreResults = []; run.exploreRanked = null;
   const sm = startMat();
   const layers = [{ n: sm.n, m: sm.key, d: settings.startThickness }];
-  const R = reflectance(layers, grid, substrate().n);
+  const R = reflectance(layers, grid, model());
   view.R = Float64Array.from(R); view.goalR = R;
   view.layers = toDisplayLayers(layers);
   view.displayGrid = uniformGrid(settings.lambdaMin, settings.lambdaMax, DISPLAY_POINTS); view.curveDirty = true;
@@ -266,9 +300,9 @@ function setInitialDesign() {
   view.highlight = null; view.insertion = null; view.candidate = null;
   spectrum.set({ lambdaMin: settings.lambdaMin, lambdaMax: settings.lambdaMax, bands: settings.bands, grid, target, weights, added: run.added, transition: settings.transition, R: view.R, curve: null, editable: true });
   needle.set({ xmax: view.xmax, layers: view.layers, scan: null, candidate: null, insertion: null, stale: false });
-  structure.set({ xmax: view.xmax, layers: view.layers, nmax: Math.max(materialH().n, materialL().n), highlight: null, substrate: substrate().label, ns: substrate().n });
+  structure.set({ xmax: view.xmax, layers: view.layers, nmax: Math.max(materialH().n, materialL().n, ambient().n), highlight: null, substrate: substrate().label, ns: substrate().n, ambient: settings.ambient === 'Air' ? 'air' : ambient().label, na: ambient().n });
   meritChart.set({ history: [], targetF: settings.targetMerit });
-  const F = merit(R, target, weights);
+  const F = meritOf(layers, grid, target, weights, model());
   updateTilesEntry({ F, layers, stage: 'Ready' });
   $('progress-bar').style.width = '0%';
   $('result-line').textContent = ''; $('result-line').classList.remove('good');
@@ -332,8 +366,8 @@ function updateCurve(force) {
   if (view.hideCurve) { if (spectrum.state.curve) spectrum.set({ curve: null }); return; }
   if (!view.displayGrid || (!view.curveDirty && !force)) return;
   const layers = view.layers.map((L) => ({ n: L.n, d: Math.max(0, L.d) }));
-  const R = reflectance(layers, view.displayGrid, substrate().n);
-  view.curve = { wl: view.displayGrid, R };
+  const sp = spectra(layers, view.displayGrid, model());
+  view.curve = { wl: view.displayGrid, R: sp.R, Rs: oblique() ? sp.Rs : null, Rp: oblique() ? sp.Rp : null };
   view.curveDirty = false;
   spectrum.set({ curve: view.curve });
 }
@@ -441,7 +475,7 @@ function applyEvent(ev, snap, opts = {}) {
     }
     case 'compare': {
       const rows = ev.trials.map((t) => {
-        const where = t.kind === 'interior' ? `layer ${t.layer + 1}` : t.kind === 'substrate' ? 'substrate side' : 'air side';
+        const where = t.kind === 'interior' ? `layer ${t.layer + 1}` : t.kind === 'substrate' ? 'substrate side' : ambientSide();
         const ok = t.ok && t.Frefined != null;
         const gain = ok ? `${(100 * (1 - t.Frefined / ev.parentF)).toFixed(1)} %` : '—';
         return { ok, html: `<tr><td>${t.material} in ${where}</td><td>${t.z.toFixed(1)} nm</td><td>${t.g.toExponential(2)}</td><td>${ok ? fmt.sci(t.Frefined) : (t.why || 'rejected')}</td><td>${gain}</td></tr>`, F: ok ? t.Frefined : Infinity };
@@ -502,7 +536,7 @@ function applyEvent(ev, snap, opts = {}) {
       const annotations = ev.trials.map((t) => ({ z: t.z, g: t.g, gain: t.delta != null && t.delta < -1e-6, label: t.delta == null ? 'no admissible width' : `ΔF ${t.delta >= 0 ? '+' : '−'}${(100 * Math.abs(t.delta)).toFixed(2)} %` }));
       needle.set({ scan: { z: ev.z, g: ev.g, layer: ev.layer }, layers: toDisplayLayers(ev.layers), candidate: null, insertion: null, stale: false, annotations, banner: ev.verdict.text, bannerKind: ev.verdict.kind });
       view.goalXmax = Math.max(50, ev.total * 1.06);
-      const rows = ev.trials.map((t) => `<tr><td>${t.material} in ${t.kind === 'interior' ? `layer ${t.layer + 1}` : t.kind === 'substrate' ? 'substrate side' : 'air side'}</td><td>${t.z.toFixed(1)} nm</td><td>${t.g.toExponential(2)}</td><td>${t.Frefined != null ? fmt.sci(t.Frefined) : (t.eta == null ? 'no admissible width' : '—')}</td><td>${t.delta != null ? `${t.delta >= 0 ? '+' : '−'}${(100 * Math.abs(t.delta)).toFixed(2)} %` : '—'}</td></tr>`).join('');
+      const rows = ev.trials.map((t) => `<tr><td>${t.material} in ${t.kind === 'interior' ? `layer ${t.layer + 1}` : t.kind === 'substrate' ? 'substrate side' : ambientSide()}</td><td>${t.z.toFixed(1)} nm</td><td>${t.g.toExponential(2)}</td><td>${t.Frefined != null ? fmt.sci(t.Frefined) : (t.eta == null ? 'no admissible width' : '—')}</td><td>${t.delta != null ? `${t.delta >= 0 ? '+' : '−'}${(100 * Math.abs(t.delta)).toFixed(2)} %` : '—'}</td></tr>`).join('');
       log('final', `Final needle check (F = ${fmt.sci(ev.F)}): ${ev.verdict.text}${ev.trials.length ? `<table class="cmp"><tr><th>candidate</th><th>z</th><th>g, nm⁻¹</th><th>F after refinement</th><th>ΔF</th></tr>${rows}</table>` : ''}`);
       break;
     }
@@ -577,8 +611,8 @@ function buildVerdict(ev) {
 /* ------------------------------------------------------------------ */
 /*  Runner                                                             */
 /* ------------------------------------------------------------------ */
-function lockSidebar() { $('sidebar').classList.add('locked'); for (const p of document.querySelectorAll('.settings-panel')) p.classList.add('locked'); spectrum.set({ editable: false }); }
-function unlockSidebar() { $('sidebar').classList.remove('locked'); for (const p of document.querySelectorAll('.settings-panel')) p.classList.remove('locked'); spectrum.set({ editable: true }); }
+function lockSidebar() { $('sidebar').classList.add('locked'); $('spectrum-tools').classList.add('locked'); for (const p of document.querySelectorAll('.settings-panel')) p.classList.add('locked'); spectrum.set({ editable: false }); }
+function unlockSidebar() { $('sidebar').classList.remove('locked'); $('spectrum-tools').classList.remove('locked'); for (const p of document.querySelectorAll('.settings-panel')) p.classList.remove('locked'); spectrum.set({ editable: true }); }
 
 /* ---- elapsed-time counter ---- */
 function timerStart() { run.timer = { running: true, startedAt: performance.now(), accum: 0 }; }
@@ -627,7 +661,7 @@ function startExploration() {
       applyEvent(ev.ev, false, { preview: true });
     } else if (ev.type === 'explore-result') {
       run.exploreResults.push(ev);
-      const Rg = reflectance(ev.layers.map((L) => ({ n: L.n, d: L.d })), view.displayGrid, substrate().n);
+      const Rg = reflectance(ev.layers.map((L) => ({ n: L.n, d: L.d })), view.displayGrid, model());
       run.ghosts[ev.index] = { wl: view.displayGrid, R: Rg, name: ev.name, F: ev.score, layers: ev.layers.length, design: ev.layers, best: false };
       let bi = -1; run.ghosts.forEach((g, i) => { if (g && (bi < 0 || g.F < run.ghosts[bi].F)) bi = i; }); run.ghosts.forEach((g, i) => { if (g) g.best = i === bi; });
       spectrum.set({ ghosts: run.ghosts.filter(Boolean).map((g) => g) });
@@ -753,13 +787,14 @@ function exportExcel() {
   const res = run.lastResult; if (!res) return;
   const grid = res.grid ? res.grid.wavelengths : run.problem.grid, target = res.grid ? res.grid.target : run.problem.target, weights = res.grid ? res.grid.weights : run.problem.weights;
   let md = 0; for (let i = 0; i < grid.length; i++) if (weights[i] > 0) md = Math.max(md, Math.abs(res.R[i] - target[i]));
+  const sp = oblique() ? spectra(res.layers, grid, model()) : null;
   const bytes = resultWorkbook({
     settings: {
-      version: VERSION, substrate: substrate(), H: materialH(), L: materialL(), lambdaMin: settings.lambdaMin, lambdaMax: settings.lambdaMax, lambdaCenter: lambdaCenter(), points: settings.points, bands: settings.bands,
+      version: VERSION, substrate: substrate(), ambient: ambient(), angle: settings.angle, pol: settings.pol, polLabel: polarizationLabel(settings.pol), H: materialH(), L: materialL(), lambdaMin: settings.lambdaMin, lambdaMax: settings.lambdaMax, lambdaCenter: lambdaCenter(), points: settings.points, bands: settings.bands,
       transition: settings.transition, startMaterial: startMat(), startThickness: settings.startThickness, startMode: settings.startMode, startName: run.startName, maxLayers: settings.maxLayers, maxTOT: settings.maxTOT, targetMerit: settings.targetMerit, thinLayer: settings.thinLayer,
       candidates: settings.candidates, denseCheck: settings.denseCheck, enrichGrid: settings.enrichGrid,
     },
-    wavelengths: grid, target, weights, R: res.R, layers: res.layers,
+    wavelengths: grid, target, weights, R: res.R, Rs: sp ? sp.Rs : null, Rp: sp ? sp.Rp : null, layers: res.layers,
     result: { F: res.F, maxDev: md, reason: res.reason || 'Intermediate design (synthesis not finished)', stats: res.stats, dense: res.dense, elapsedMs: res.elapsedMs, summary: res.stop ? res.stop.summary : null, verified: res.stop ? res.stop.verified : null, selection: res.selection || null },
     starts: run.exploreResults,
   });
@@ -830,4 +865,4 @@ function init() {
 }
 
 init();
-window.msAstra = { settings, run, view, spectrum, needle, structure, meritChart, VERSION };
+window.msAstra = { settings, run, view, spectrum, needle, structure, meritChart, VERSION, model };

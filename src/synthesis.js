@@ -27,7 +27,7 @@
  * reports each result; the interface replays the winner with `synthesize`.
  */
 import {
-  evaluate, reflectance, merit, scanNeedles, insertNeedle, cleanThinLayers,
+  evaluate, reflectance, meritOf, assess, opticsModel, scanNeedles, insertNeedle, cleanThinLayers,
   mergeEqualNeighbours, totalOpticalThickness,
 } from './optics.js';
 import { refine, refineToEnd } from './refine.js';
@@ -57,19 +57,23 @@ export function startLayers(cfg) {
  */
 export function startDesigns(cfg, lambdaCenter) {
   const H = cfg.materials.H, Lm = cfg.materials.L;
+  // a quarter wave at the angle of incidence: φ_j = k n_j cos γ_j d_j = π/2, cos γ_j = √(1 − α²/n_j²) (book §1.2.1)
+  const alpha = (cfg.na ?? 1) * Math.sin((cfg.angle ?? 0) * Math.PI / 180);
+  const cosG = (n) => (alpha < n ? Math.sqrt(1 - alpha * alpha / (n * n)) : 1);
+  const qw = (mat) => lambdaCenter / (4 * mat.n * cosG(mat.n));
   const out = [];
   if (cfg.start && !cfg.start.layers) out.push({ name: `${cfg.start.material} ${cfg.start.thickness} nm (manual)`, start: { ...cfg.start } });
   for (const mat of [Lm, H]) for (const q of [1, 2, 4, 8]) {
-    const d = q * lambdaCenter / (4 * mat.n);
+    const d = q * qw(mat);
     if (mat.n * d <= (cfg.maxOpticalThickness ?? Infinity)) out.push({ name: `${mat.m} ${q} QWOT (${d.toFixed(1)} nm)`, start: { material: mat.m, thickness: d } });
   }
-  const pairTOT = lambdaCenter / 2;
+  const pairTOT = H.n * qw(H) + Lm.n * qw(Lm);   // optical thickness of one HL pair (λ/2 at normal incidence)
   const maxPairs = Math.floor(Math.min(((cfg.maxLayers ?? 40) - 1) / 2, 0.6 * (cfg.maxOpticalThickness ?? Infinity) / pairTOT));
   const N = Math.max(1, Math.min(12, maxPairs));
   if (maxPairs >= 1) {
     const layers = [];
-    for (let i = 0; i < N; i++) { layers.push({ m: H.m, n: H.n, d: lambdaCenter / (4 * H.n) }); layers.push({ m: Lm.m, n: Lm.n, d: lambdaCenter / (4 * Lm.n) }); }
-    if (2 * N + 1 <= (cfg.maxLayers ?? 40)) layers.push({ m: H.m, n: H.n, d: lambdaCenter / (4 * H.n) });
+    for (let i = 0; i < N; i++) { layers.push({ m: H.m, n: H.n, d: qw(H) }); layers.push({ m: Lm.m, n: Lm.n, d: qw(Lm) }); }
+    if (2 * N + 1 <= (cfg.maxLayers ?? 40)) layers.push({ m: H.m, n: H.n, d: qw(H) });
     out.push({ name: `(HL)${sup(N)}${layers.length % 2 ? 'H' : ''} quarter‑wave stack @ ${lambdaCenter.toFixed(0)} nm`, start: { layers } });
   }
   return out;
@@ -79,7 +83,9 @@ function sup(n) { return String(n).split('').map((c) => SUPS[+c]).join(''); }
 
 export function* synthesize(cfg) {
   const { ns, na = 1, materials } = cfg;
-  const problem = { wavelengths: Float64Array.from(cfg.wavelengths), target: Float64Array.from(cfg.target), weights: Float64Array.from(cfg.weights), ns, na };
+  // optical model: substrate, incident medium, angle of incidence and the target characteristic (Rs, Rp, both, unpolarized mean)
+  const model = opticsModel({ ns, na, angle: cfg.angle ?? 0, pol: cfg.pol ?? 'avg' });
+  const problem = { wavelengths: Float64Array.from(cfg.wavelengths), target: Float64Array.from(cfg.target), weights: Float64Array.from(cfg.weights), ns, na, model };
   const H = materials.H, Lm = materials.L;
   const other = (lay) => (lay.m === H.m ? Lm.n : H.n);
   const matByIndex = (n) => (n === H.n ? H : Lm);
@@ -113,14 +119,14 @@ export function* synthesize(cfg) {
   const dense = denseOn ? denseGrid(bands, lamMin, lamMax, denseTransition, cfg.dense?.points) : null;
   const denseCheck = (ls) => {
     if (!dense) return null;
-    const R = reflectance(ls, dense.wavelengths, ns, na);
-    let md = 0; for (let i = 0; i < R.length; i++) if (dense.weights[i] > 0) md = Math.max(md, Math.abs(R[i] - dense.target[i]));
-    return { F: merit(R, dense.target, dense.weights), maxDev: md, R };
+    const a = assess(ls, dense.wavelengths, dense.target, dense.weights, model);
+    return { F: a.F, maxDev: a.maxDev, R: a.R, Rs: a.Rs, Rp: a.Rp };
   };
 
   const startMat = cfg.start.material ? (cfg.start.material === H.m ? H : Lm) : H;
   let layers = startLayers(cfg);
-  const evalF = (ls) => merit(reflectance(ls, problem.wavelengths, ns, na), problem.target, problem.weights);
+  const evalF = (ls) => meritOf(ls, problem.wavelengths, problem.target, problem.weights, model);
+  const evalR = (ls) => reflectance(ls, problem.wavelengths, model);
   const stats = { refinements: 0, needles: 0, rejected: 0, compared: 0, growths: 0, cleanups: 0, lmIterations: 0, cycles: 0, enrichments: 0, pointsAdded: 0 };
   let best = null;
   const keepBest = (ls, F) => {
@@ -146,8 +152,8 @@ export function* synthesize(cfg) {
   }
   const silentRefine = (ls) => { const r = refineToEnd(ls, problem, lmOpts); stats.refinements++; stats.lmIterations += r.iterations; return r; };
 
-  let R0 = reflectance(layers, problem.wavelengths, ns, na);
-  let F = merit(R0, problem.target, problem.weights);
+  let R0 = evalR(layers);
+  let F = evalF(layers);
   yield { type: 'start', layers: copy(layers), R: R0, F, name: cfg.start.name || null };
   let res = yield* doRefine(layers, 'Initial refinement');
   layers = dropZeroLayers(res.layers, startMat); F = res.F; keepBest(layers, F);
@@ -173,7 +179,7 @@ export function* synthesize(cfg) {
         if (added.length) {
           stats.enrichments++; stats.pointsAdded += added.length;
           F = evalF(layers);
-          yield { type: 'grid', wavelengths: Float64Array.from(problem.wavelengths), target: Float64Array.from(problem.target), weights: Float64Array.from(problem.weights), added, layers: copy(layers), R: reflectance(layers, problem.wavelengths, ns, na), F };
+          yield { type: 'grid', wavelengths: Float64Array.from(problem.wavelengths), target: Float64Array.from(problem.target), weights: Float64Array.from(problem.weights), added, layers: copy(layers), R: evalR(layers), F };
           const rg = yield* doRefine(layers, 'Refinement on the enriched grid');
           layers = dropZeroLayers(rg.layers, startMat); F = rg.F; best = null; keepBest(layers, F);
           dc = denseCheck(layers);
@@ -190,7 +196,7 @@ export function* synthesize(cfg) {
       if (F <= targetF && (!dc || dc.F <= targetF)) { needleStop = 'target'; break; }
       if (overBudget()) { needleStop = 'budget'; stop = { kind: 'budget' }; break; }   // stop immediately: no further design change after a budget stop
       yield { type: 'stage', stage: 'needle' };
-      const ev = evaluate(layers, problem.wavelengths, problem.target, problem.weights, ns, na, true);
+      const ev = evaluate(layers, problem.wavelengths, problem.target, problem.weights, model, true);
       const scan = scanNeedles(layers, ev.adjoint, problem.wavelengths, other);
       yield { type: 'scan', z: scan.z, g: scan.g, layer: scan.layer, total: scan.total, candidates: scan.candidates.slice(0, 8), layers: copy(layers), F };
       if (!scan.candidates.length) { needleStop = 'stationary'; yield { type: 'note', text: 'No negative needle derivative: the design is needle‑stationary.' }; break; }
@@ -239,12 +245,12 @@ export function* synthesize(cfg) {
       }
       stats.needles++;
       const t = bestTrial;
-      yield { type: 'needle', candidate: t.cand, eta: t.eta, material: t.mat.m, layers: t.trial.map((L) => ({ ...L })), R: reflectance(t.trial, problem.wavelengths, ns, na), F: t.Ft, Fparent: F, attempts: t.attempts, alternatives: trials.filter((x) => x.ok).length };
+      yield { type: 'needle', candidate: t.cand, eta: t.eta, material: t.mat.m, layers: t.trial.map((L) => ({ ...L })), R: evalR(t.trial), F: t.Ft, Fparent: F, attempts: t.attempts, alternatives: trials.filter((x) => x.ok).length };
       const r2 = yield* doRefine(t.trial, 'Refinement after needle');
       const cleaned = dropZeroLayers(r2.layers, startMat);
       const Fc = evalF(cleaned);
       if (Fc < F * (1 - eps) && cleaned.length <= maxLayers) { layers = cleaned; F = Fc; keepBest(layers, F); }
-      else { stats.rejected++; needleStop = blocked ? 'layer-limit' : 'no-gain'; layerLimitPartial = blocked > 0; yield { type: 'needle-rejected', candidate: t.cand, why: `refined merit ${Fc.toExponential(3)} is not below parent ${F.toExponential(3)}`, layers: copy(layers), R: reflectance(layers, problem.wavelengths, ns, na), F }; break; }
+      else { stats.rejected++; needleStop = blocked ? 'layer-limit' : 'no-gain'; layerLimitPartial = blocked > 0; yield { type: 'needle-rejected', candidate: t.cand, why: `refined merit ${Fc.toExponential(3)} is not below parent ${F.toExponential(3)}`, layers: copy(layers), R: evalR(layers), F }; break; }
     }
     if (stop) break;
 
@@ -254,8 +260,7 @@ export function* synthesize(cfg) {
       const { layers: cl, removed } = cleanThinLayers(layers, dMin);
       if (removed) {
         stats.cleanups += removed;
-        const Rc = reflectance(cl, problem.wavelengths, ns, na);
-        yield { type: 'cleanup', removed, layers: copy(cl), R: Rc, F: merit(Rc, problem.target, problem.weights), before: copy(layers) };
+        yield { type: 'cleanup', removed, layers: copy(cl), R: evalR(cl), F: evalF(cl), before: copy(layers) };
         const r3 = yield* doRefine(cl, 'Refinement after cleanup');
         layers = dropZeroLayers(r3.layers, startMat); F = r3.F; keepBest(layers, F);
       }
@@ -273,7 +278,7 @@ export function* synthesize(cfg) {
     growthCapped = growth.s * layers[growth.layer].n >= (maxTOT - tot) - 1e-6;
     stats.growths++;
     const grown = copy(layers); grown[growth.layer].d += growth.s;
-    yield { type: 'growth', layer: growth.layer, from: layers[growth.layer].d, to: grown[growth.layer].d, curve: growth.curve, layers: grown, R: reflectance(grown, problem.wavelengths, ns, na), F: growth.F, Fparent: F };
+    yield { type: 'growth', layer: growth.layer, from: layers[growth.layer].d, to: grown[growth.layer].d, curve: growth.curve, layers: grown, R: evalR(grown), F: growth.F, Fparent: F };
     const r4 = yield* doRefine(grown, 'Refinement after growth');
     layers = dropZeroLayers(r4.layers, startMat); F = r4.F; keepBest(layers, F);
 
@@ -293,8 +298,7 @@ export function* synthesize(cfg) {
     const { layers: cl, removed } = cleanThinLayers(layers, dMin);
     if (removed) {
       stats.cleanups += removed; finalCleanupRemoved = removed;
-      const Rc = reflectance(cl, problem.wavelengths, ns, na);
-      yield { type: 'cleanup', removed, layers: copy(cl), R: Rc, F: merit(Rc, problem.target, problem.weights), before: copy(layers), final: true };
+      yield { type: 'cleanup', removed, layers: copy(cl), R: evalR(cl), F: evalF(cl), before: copy(layers), final: true };
       const r5 = yield* doRefine(cl, 'Final refinement');
       layers = dropZeroLayers(r5.layers, startMat); F = r5.F;
     }
@@ -302,8 +306,8 @@ export function* synthesize(cfg) {
     const r5 = yield* doRefine(layers, 'Final refinement');
     layers = dropZeroLayers(r5.layers, startMat); F = r5.F;
   }
-  const Rf = reflectance(layers, problem.wavelengths, ns, na);
-  const Ff = merit(Rf, problem.target, problem.weights);
+  const Rf = evalR(layers);
+  const Ff = evalF(layers);
   const dcf = denseCheck(layers);
   const finalTOT = totalOpticalThickness(layers);
   // ---- compose the termination reason from the recorded facts ----
@@ -336,7 +340,7 @@ export function* synthesize(cfg) {
 
   // ---------------- final needle scan: evidence that insertions no longer help ----------------
   {
-    const evF = evaluate(layers, problem.wavelengths, problem.target, problem.weights, ns, na, true);
+    const evF = evaluate(layers, problem.wavelengths, problem.target, problem.weights, model, true);
     const scanF = scanNeedles(layers, evF.adjoint, problem.wavelengths, other);
     const top = scanF.candidates.slice(0, Math.max(1, kCand > 0 ? kCand : 3)).slice(0, 5);
     const trials = [];
@@ -476,13 +480,13 @@ export function* synthesize(cfg) {
       chk('summary and reason describe the same cause', ({ target: /^Target merit/, tot: /^Optical‑thickness limit/, budget: /budget/i, cycles: /^Cycle budget/, layers: /layer limit/, needle: /needle‑stationary|no needle lowers/, growth: /^No further progress|step limit/ })[stop.summary.decisive].test(stop.base), `${stop.summary.decisive} ↔ «${stop.base}»`);
     }
     chk('reported design respects the limits', layers.length <= maxLayers && finalTOT <= maxTOT + 1e-6, `${layers.length} layers, ${finalTOT.toFixed(1)} nm`);
-    chk('reported F equals an independent re‑evaluation', Math.abs(merit(reflectance(layers, problem.wavelengths, ns, na), problem.target, problem.weights) - Ff) <= 1e-15, '');
+    chk('reported F equals an independent re‑evaluation', Math.abs(assess(layers, problem.wavelengths, problem.target, problem.weights, model).F - Ff) <= 1e-15, '');
     stop.checks = checks; stop.verified = checks.every((c) => c.ok);
   }
   const done = {
     type: 'done', layers: copy(layers), R: Rf, F: Ff, reason, stop, stats, opticalThickness: finalTOT,
     grid: { wavelengths: Float64Array.from(problem.wavelengths), target: Float64Array.from(problem.target), weights: Float64Array.from(problem.weights) },
-    dense: dcf ? { wavelengths: dense.wavelengths, target: dense.target, weights: dense.weights, R: dcf.R, F: dcf.F, maxDev: dcf.maxDev } : null,
+    dense: dcf ? { wavelengths: dense.wavelengths, target: dense.target, weights: dense.weights, R: dcf.R, Rs: dcf.Rs, Rp: dcf.Rp, F: dcf.F, maxDev: dcf.maxDev } : null,
     start: cfg.start, elapsedMs: Date.now() - t0,
   };
   yield done;
@@ -525,8 +529,9 @@ export function enrichGrid(problem, dense, Rdense, bands, transition, count) {
  * the smallest F that still respects the optical‑thickness limit.
  */
 export function growthSearch(layers, problem, { lamMin, lamMax, maxTOT }) {
-  const { wavelengths, target, weights, ns, na } = problem;
-  const evalF = (ls) => merit(reflectance(ls, wavelengths, ns, na), target, weights);
+  const { wavelengths, target, weights } = problem;
+  const model = problem.model || { ns: problem.ns, na: problem.na ?? 1 };
+  const evalF = (ls) => meritOf(ls, wavelengths, target, weights, model);
   const tot = totalOpticalThickness(layers);
   let bestPick = null;
   for (let j = 0; j < layers.length; j++) {

@@ -136,7 +136,8 @@ function presetConfig(key, targetMerit) {
   const p = PRESETS[key]; const bands = bandsFromPreset(p);
   const wl = uniformGrid(p.range[0], p.range[1], 41); const s = sampleTarget(bands, wl, 0);
   const H = materialByKey(p.H), L = materialByKey(p.L);
-  return { wavelengths: wl, target: s.target, weights: s.weights, bands, transition: 0, ns: 1.52, materials: { H: { n: H.n, m: H.key }, L: { n: L.n, m: L.key } },
+  // the preset's incidence (angle, polarization characteristic, incident medium) is part of the task
+  return { wavelengths: wl, target: s.target, weights: s.weights, bands, transition: 0, ns: 1.52, na: p.ambient === 'BK7' ? 1.52 : 1, angle: p.angle ?? 0, pol: p.pol ?? 'avg', materials: { H: { n: H.n, m: H.key }, L: { n: L.n, m: L.key } },
     start: { material: p.start.material, thickness: p.start.thickness }, maxLayers: Math.min(p.maxLayers, 24), maxOpticalThickness: Math.min(p.maxTOT, 3500), targetMerit, thinLayer: 1, budgetMs: 20000 };
 }
 
@@ -244,4 +245,55 @@ test('the termination summary names the decisive stopping condition and agrees w
   let final = null; for (const ev of explore(cfg)) if (ev.type === 'explore-done') final = ev;
   for (const r of final.results) assert.ok(r.summary && r.summary.headline && r.summary.facts.length >= 5, `${r.name}: summary missing`);
   for (let i = 1; i < final.results.length; i++) assert.ok(final.results[i - 1].score <= final.results[i].score);
+});
+
+/* ---------------- v2.3: oblique incidence ---------------- */
+import { assess, opticsModel } from '../src/optics.js';
+
+function obliqueConfig(key, extra = {}) {
+  const p = PRESETS[key]; const bands = bandsFromPreset(p);
+  const wl = uniformGrid(p.range[0], p.range[1], 41); const s = sampleTarget(bands, wl, 0);
+  const H = materialByKey(p.H), L = materialByKey(p.L);
+  return { wavelengths: wl, target: s.target, weights: s.weights, bands, transition: 0, ns: 1.52, na: p.ambient === 'BK7' ? 1.52 : 1, angle: p.angle ?? 0, pol: p.pol ?? 'avg', materials: { H: { n: H.n, m: H.key }, L: { n: L.n, m: L.key } },
+    start: { material: p.start.material, thickness: p.start.thickness }, maxLayers: p.maxLayers, maxOpticalThickness: p.maxTOT, targetMerit: p.merit, thinLayer: 1, budgetMs: 60000, ...extra };
+}
+
+test('oblique synthesis: the 45° cube splitter (unpolarized, inside BK7) and the 45° AR coating (both polarizations) reach their targets; reported numbers are consistent', () => {
+  for (const key of ['cube', 'ar45']) {
+    const cfg = obliqueConfig(key);
+    const { events, done } = runAll(cfg);
+    assert.match(done.reason, /^Target merit reached/, `${key}: ${done.reason}`);
+    assert.ok(done.layers.length <= cfg.maxLayers && done.opticalThickness <= cfg.maxOpticalThickness + 1e-6);
+    assert.ok(done.stop.verified, done.stop.checks.filter((c) => !c.ok).map((c) => c.name).join('; '));
+    const model = opticsModel({ ns: cfg.ns, na: cfg.na, angle: cfg.angle, pol: cfg.pol });
+    const a = assess(done.layers, cfg.wavelengths, cfg.target, cfg.weights, model);
+    assert.ok(Math.abs(a.F - done.F) < 1e-15, 'reported F equals an independent assessment');
+    assert.ok(done.dense && done.dense.Rs && done.dense.Rp && done.dense.F <= cfg.targetMerit);
+    for (const e of events.filter((x) => x.type === 'needle')) assert.ok(e.F < e.Fparent);
+    if (key === 'cube') {
+      // unpolarized target reached while the polarizations split strongly at 45° inside glass
+      let ds = 0; for (let l = 0; l < cfg.wavelengths.length; l++) ds = Math.max(ds, Math.abs(a.Rs[l] - a.Rp[l]));
+      assert.ok(ds > 0.3, `Rs − Rp split ${ds}`);
+    } else {
+      // both polarizations are individually low
+      assert.ok(Math.max(...a.Rs) < 0.02 && Math.max(...a.Rp) < 0.02);
+    }
+  }
+});
+
+test('oblique synthesis: evanescent low-index layers (from BK7 at 75°) and the Rs-only characteristic run to a verified termination', () => {
+  for (const extra of [{ na: 1.52, angle: 75, pol: 'avg', maxLayers: 12, maxOpticalThickness: 1500, budgetMs: 20000 }, { na: 1, angle: 70, pol: 's', budgetMs: 20000 }]) {
+    const cfg = { ...obliqueConfig('ar'), ...extra };
+    const { done } = runAll(cfg);
+    assert.ok(done.stop.verified, `${JSON.stringify(extra)}: ${done.stop.checks.filter((c) => !c.ok).map((c) => `${c.name} [${c.detail}]`).join('; ')}`);
+    const model = opticsModel({ ns: cfg.ns, na: cfg.na, angle: cfg.angle, pol: cfg.pol });
+    assert.ok(Math.abs(assess(done.layers, cfg.wavelengths, cfg.target, cfg.weights, model).F - done.F) < 1e-15);
+    assert.ok(done.layers.every((L) => L.d >= 1 - 1e-9 && Number.isFinite(L.d)));
+  }
+  // quarter-wave starting designs are corrected for the angle of incidence
+  const cfg45 = obliqueConfig('cube');
+  const s45 = startDesigns(cfg45, 550), s0 = startDesigns({ ...cfg45, angle: 0 }, 550);
+  const q45 = s45.find((s) => /SiO2 1 QWOT/.test(s.name)), q0 = s0.find((s) => /SiO2 1 QWOT/.test(s.name));
+  const cosG = Math.sqrt(1 - (1.52 * Math.sin(Math.PI / 4) / 1.46) ** 2);
+  assert.ok(Math.abs(q45.start.thickness - q0.start.thickness / cosG) < 1e-9);
 });

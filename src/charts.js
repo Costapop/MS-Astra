@@ -84,7 +84,7 @@ export class SpectrumChart extends Plot {
   constructor(canvas, tooltip) {
     super(canvas, { l: 66, r: 18, t: 26, b: 34 });
     this.tooltip = tooltip;
-    this.state = { lambdaMin: 400, lambdaMax: 700, bands: [], grid: null, target: null, R: null, weights: null, added: null, curve: null, curveDashed: false, transition: 0, yMode: 'full', editable: true, ghosts: [], ghostHighlight: null };
+    this.state = { lambdaMin: 400, lambdaMax: 700, bands: [], grid: null, target: null, R: null, weights: null, added: null, curve: null, curveDashed: false, transition: 0, yMode: 'full', editable: true, ghosts: [], ghostHighlight: null, showPols: false, showRs: true, showRp: true, charLabel: 'R' };
     this.onChange = null;      // (patch) => void
     this.hover = null; this.drag = null;
     const c = canvas;
@@ -150,8 +150,14 @@ export class SpectrumChart extends Plot {
     const t = s.target ? s.target[i] : null, r = s.R ? s.R[i] : null;
     let html = `<b>λ = ${s.grid[i].toFixed(1)} nm</b>`;
     if (t != null) html += `<br>Target ${fmt.pct(t)}`;
-    if (r != null) html += `<br>Current ${fmt.pct(r, 3)}`;
+    if (r != null) html += `<br>Current ${s.showPols ? s.charLabel + ' ' : ''}${fmt.pct(r, 3)}`;
     if (t != null && r != null) html += `<br>Error ${(100 * (r - t)).toFixed(3)} p.p.`;
+    if (s.showPols && s.curve && s.curve.Rs && s.curve.Rp) {
+      // s and p polarizations from the dense display curve, nearest point
+      let ci = 0, cd = Infinity;
+      for (let k = 0; k < s.curve.wl.length; k++) { const d = Math.abs(s.curve.wl[k] - s.grid[i]); if (d < cd) { cd = d; ci = k; } }
+      html += `<br>Rs ${fmt.pct(s.curve.Rs[ci], 3)} · Rp ${fmt.pct(s.curve.Rp[ci], 3)}`;
+    }
     this.tooltip.innerHTML = html; this.tooltip.hidden = false;
     const tw = this.tooltip.offsetWidth, th = this.tooltip.offsetHeight;
     let x = p.x + 14, y = p.y - th - 8;
@@ -256,6 +262,16 @@ export class SpectrumChart extends Plot {
         ctx.fillStyle = T.ink; ctx.font = `600 11px ${T.font}`; ctx.textAlign = 'left'; ctx.textBaseline = top ? 'top' : 'bottom';
         ctx.fillText(`${hl.name} · F = ${fmt.sci(hl.F)} · ${hl.layers} layers`, fr.x0 + 8, top ? fr.y0 + 4 : fr.y1 - 4); ctx.font = `11px ${T.font}`;
       }
+    }
+    // s and p polarizations at oblique incidence: thin solid (s) and dashed (p) lines under the characteristic
+    if (s.showPols && s.curve && s.curve.Rs && s.curve.Rp && !s.curveDashed) {
+      for (const [arr, dash, on] of [[s.curve.Rs, [], s.showRs], [s.curve.Rp, [5, 4], s.showRp]]) {
+        if (!on) continue;
+        ctx.beginPath();
+        for (let i = 0; i < s.curve.wl.length; i++) { const x = xs(s.curve.wl[i]), y = ys(arr[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+        ctx.strokeStyle = T['series-current']; ctx.lineWidth = 1.25; ctx.globalAlpha = 0.7; ctx.setLineDash(dash); ctx.stroke();
+      }
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
     }
     // current R: dense display curve (or grid values) as area + line
     const cw = s.curve ? s.curve.wl : s.grid, cR = s.curve ? s.curve.R : s.R;
@@ -459,7 +475,7 @@ export class StructureChart extends Plot {
   constructor(canvas, tooltip) {
     super(canvas, { l: 66, r: 18, t: 16, b: 34 });
     this.tooltip = tooltip;
-    this.state = { xmax: 1, layers: [], nmax: 2.5, highlight: null, substrate: 'BK7', ns: 1.52 };
+    this.state = { xmax: 1, layers: [], nmax: 2.5, highlight: null, substrate: 'BK7', ns: 1.52, ambient: 'air', na: 1 };
     canvas.addEventListener('pointermove', (e) => this.onMove(e));
     canvas.addEventListener('pointerleave', () => { this.tooltip.hidden = true; });
   }
@@ -521,9 +537,13 @@ export class StructureChart extends Plot {
       }
       z += L.d;
     }
-    // ambient label
+    // ambient medium: label, and its index level when it is not air
+    if (s.na > 1) {
+      const ya = ys(s.na);
+      ctx.fillStyle = T.substrate; ctx.globalAlpha = 0.35; ctx.fillRect(xs(z), ya, Math.max(0, fr.x1 - xs(z)), fr.y1 - ya); ctx.globalAlpha = 1;
+    }
     ctx.fillStyle = T['ink-3']; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    if (xs(z) + 36 < fr.x1) ctx.fillText('air', xs(z) + 8, (fr.y0 + fr.y1) / 2);
+    if (xs(z) + 36 < fr.x1) ctx.fillText(s.ambient || 'air', xs(z) + 8, (fr.y0 + fr.y1) / 2);
     ctx.fillStyle = T['ink-3']; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
     ctx.fillText(`${s.layers.length} layer${s.layers.length === 1 ? '' : 's'} · ${fmtNum(z, 0)} nm`, fr.x1, fr.y0 + 2);
   }
