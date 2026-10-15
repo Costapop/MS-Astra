@@ -9,7 +9,7 @@ import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
 
-export const VERSION = '2.4.0';
+export const VERSION = '2.5.0';
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------------ */
@@ -309,6 +309,7 @@ const run = {
   history: [], events: 0, F0: null, lastResult: null, cycle: 0, stage: '', engineLayers: [], problem: null, added: new Set(),
   dense: null, startName: null, exploreResults: [], exploreRanked: null, cfg: null,
   ghosts: [], logExpanded: false, exploreLabel: null,
+  starts: [], exploreIndex: null,   // multi‑start: { history, name, running, best, done } per starting design; the start being explored
   timer: { running: false, startedAt: 0, accum: 0 },
 };
 const LOG_TAIL = 5;
@@ -335,15 +336,15 @@ function setInitialDesign() {
   spectrum.set({ lambdaMin: settings.lambdaMin, lambdaMax: settings.lambdaMax, bands: settings.bands, bands2: dual() ? settings.bands2 : null, dual: dual(), grid, target, weights, added: run.added, transition: settings.transition, R: view.R, curve: null, editable: true });
   needle.set({ xmax: view.xmax, layers: view.layers, scan: null, candidate: null, insertion: null, stale: false });
   structure.set({ xmax: view.xmax, layers: view.layers, nmax: Math.max(materialH().n, materialL().n, ambient().n), highlight: null, substrate: substrate().label, ns: substrate().n, ambient: settings.ambient === 'Air' ? 'air' : ambient().label, na: ambient().n });
-  meritChart.set({ history: [], targetF: settings.targetMerit });
+  meritChart.set({ history: [], targetF: settings.targetMerit, starts: null, highlight: null });
   const F = meritOf(layers, grid, target, weights, model());
   updateTilesEntry({ F, layers, stage: 'Ready' });
   $('progress-bar').style.width = '0%';
   $('result-line').textContent = ''; $('result-line').classList.remove('good');
   $('cycle-label').textContent = 'Not started';
-  $('explore-list').hidden = true; $('explore-list').innerHTML = ''; $('btn-starts').hidden = true; document.querySelector('#card-stats .tiles').hidden = false;
-  run.ghosts = []; view.hideCurve = false; spectrum.set({ ghosts: [], ghostHighlight: null }); $('legend-ghost').hidden = true;
-  if (settings.startMode === 'multi') startLabel(`10 starting designs will be explored in the background; the winner is replayed`, true);
+  run.ghosts = []; run.starts = []; run.exploreIndex = null; view.hideCurve = false; spectrum.set({ ghosts: [], ghostHighlight: null }); $('legend-ghost').hidden = true;
+  resetMultiCard();
+  if (settings.startMode === 'multi') startLabel(`the winner of the explored starting designs is replayed here`, true);
   else startLabel(`${sm.label} ${settings.startThickness} nm`, false);
   $('stage-text').title = '';
   needle.set({ annotations: null, banner: null });
@@ -361,7 +362,7 @@ function updateTilesEntry({ F, layers, stage }) {
   else if (run.problem && view.goalR) {
     let md = 0;
     if (dual()) md = assess(layers, run.problem.grid, run.problem.target, run.problem.weights, model()).maxDev;
-    else { const t = polTarget(run.problem.target, 's'), w = polTarget(run.problem.weights, 's'); for (let i = 0; i < view.goalR.length; i++) if (w[i] > 0) md = Math.max(md, Math.abs(view.goalR[i] - t[i])); }
+    else { const t = polTarget(run.problem.target, 's'), w = polTarget(run.problem.weights, 's'); const n = Math.min(view.goalR.length, t.length); for (let i = 0; i < n; i++) if (w[i] > 0) md = Math.max(md, Math.abs(view.goalR[i] - t[i])); }
     $('t-maxdev').textContent = `max |ΔR| ${(100 * md).toFixed(2)} p.p.`;
   }
   $('t-layers').textContent = String(layers.length); $('t-layers-sub').textContent = `of ${settings.maxLayers} max`;
@@ -409,11 +410,38 @@ function updateCurve(force) {
 }
 
 function startLabel(html, multi) { $('start-label').innerHTML = `<span class="badge${multi ? ' multi' : ''}">${multi ? 'Multi‑start' : 'Single layer'}</span><span>${html}</span>`; }
+
+/* ---- Multi‑start card: the starting designs and their status; a merit history per start on the history chart ---- */
+function renderStartsList(names) {
+  const ol = $('explore-list'); ol.innerHTML = '';
+  names.forEach((name, i) => {
+    const li = document.createElement('li'); li.id = `explore-${i}`; li.className = 'pending';
+    li.innerHTML = `<span class="n">${i + 1}. ${name}</span><span class="f">—</span><span class="l"></span>`;
+    li.addEventListener('mouseenter', () => highlightGhost(i)); li.addEventListener('mouseleave', () => highlightGhost(null));
+    ol.appendChild(li);
+  });
+}
+/** The card follows the starting‑design mode: shown with the list of starts before a multi‑start run, hidden otherwise. */
+function resetMultiCard() {
+  const multi = settings.startMode === 'multi';
+  $('card-multistart').hidden = !multi; $('rail').classList.toggle('multi', multi); $('btn-starts').hidden = true; $('merit-legend').hidden = !multi;
+  if (!multi) { $('explore-list').innerHTML = ''; $('multi-label').textContent = '—'; return; }
+  let names = [];
+  try { names = startDesigns(engineConfig(), lambdaCenter()).map((s) => s.name); } catch { names = []; }
+  renderStartsList(names);
+  $('multi-label').textContent = `${names.length} starting designs · up to ${settings.exploreBudget} s each`;
+  $('multi-label').title = 'Every start is synthesized in the background with the same limits; the best by max(F, F_dense) is replayed on the dashboard';
+}
+function pushStartHistory(F, mark) {
+  const st = run.exploreIndex != null ? run.starts[run.exploreIndex] : null; if (!st) return;
+  st.history.push({ F, mark }); meritChart.set({ starts: run.starts });
+}
 function syncStructure() { structure.set({ layers: view.layers, xmax: view.xmax, highlight: view.highlight }); }
 function highlightGhost(index) {
   const list = run.ghosts.filter(Boolean);
   const gh = index != null ? run.ghosts[index] : null;
   spectrum.set({ ghostHighlight: gh ? list.indexOf(gh) : null });
+  meritChart.set({ highlight: index != null && run.starts[index] ? index : null });
   if (gh) {
     const disp = toDisplayLayers(gh.design); const total = gh.design.reduce((a, L) => a + L.d, 0);
     structure.set({ layers: disp, xmax: Math.max(view.xmax, total * 1.06), highlight: null });
@@ -440,8 +468,8 @@ function layersFromEvent(evLayers, { animate = true } = {}) {
 function applyEvent(ev, snap, opts = {}) {
   const quiet = !!opts.preview;   // exploration preview: charts only, no log/history/tiles/result
   const log = quiet ? () => {} : logEntry;
-  const pushHistory = quiet ? () => {} : pushHistoryEntry;
-  const updateTiles = quiet ? () => {} : updateTilesEntry;
+  const pushHistory = quiet ? pushStartHistory : pushHistoryEntry;
+  const updateTiles = quiet ? (o) => updateTilesEntry({ ...o, stage: null }) : updateTilesEntry;   // the tiles follow the start being explored
   const setStage = quiet ? (t, c) => setStageEntry(`${run.exploreLabel || 'Exploring'} · ${t}`, c) : setStageEntry;
   run.events++;
   switch (ev.type) {
@@ -687,12 +715,10 @@ function startExploration() {
   const cfg = { ...run.cfg, budgetMs: 1000 * settings.exploreBudget };
   const list = startDesigns(cfg, lambdaCenter());
   run.exploring = true; run.gen = null; run.exploreResults = [];
-  const ol = $('explore-list'); ol.hidden = false; ol.innerHTML = ''; ol.classList.add('exploring'); document.querySelector('#card-stats .tiles').hidden = true;
-  list.forEach((s, i) => {
-    const li = document.createElement('li'); li.id = `explore-${i}`; li.innerHTML = `<span class="n">${i + 1}. ${s.name}</span><span class="f">—</span><span class="l"></span>`;
-    li.addEventListener('mouseenter', () => highlightGhost(i)); li.addEventListener('mouseleave', () => highlightGhost(null));
-    ol.appendChild(li);
-  });
+  run.starts = list.map((s) => ({ history: [], name: s.name, running: false, best: false, done: false })); run.exploreIndex = null;
+  renderStartsList(list.map((s) => s.name));
+  $('multi-label').textContent = `exploring ${list.length} starting designs · up to ${settings.exploreBudget} s each`;
+  meritChart.set({ starts: run.starts, highlight: null });
   view.hideCurve = false; spectrum.set({ preview: true, ghosts: run.ghosts, ghostHighlight: null }); $('legend-ghost').hidden = false;
   setStageEntry(`Exploring ${list.length} starting designs in the background…`, 'running');
   $('btn-run').textContent = 'Exploring…'; $('btn-run').disabled = true; $('btn-step').disabled = true;
@@ -701,9 +727,12 @@ function startExploration() {
   const onEvent = (ev) => {
     if (!run.exploring) return;
     if (ev.type === 'explore-start') {
-      const li = $(`explore-${ev.index}`); if (li) li.classList.add('running');
+      const li = $(`explore-${ev.index}`); if (li) { li.classList.add('running'); li.classList.remove('pending'); li.querySelector('.f').textContent = 'running'; li.scrollIntoView({ block: 'nearest' }); }
       run.exploreLabel = `Start ${ev.index + 1}/${ev.total} «${ev.name}»`; run.cycle = 0;
+      run.exploreIndex = ev.index; if (run.starts[ev.index]) run.starts[ev.index].running = true;
+      run.dense = null;
       startLabel(`exploring ${ev.index + 1} of ${ev.total}: ${ev.name}`, true);
+      $('multi-label').textContent = `exploring ${ev.index + 1} of ${ev.total} · up to ${settings.exploreBudget} s each`;
       setStageEntry(`${run.exploreLabel} · starting`, 'running');
       $('cycle-label').textContent = `Exploration ${ev.index + 1}/${ev.total}`;
     } else if (ev.type === 'explore-event') {
@@ -716,6 +745,11 @@ function startExploration() {
       run.ghosts[ev.index] = { wl: view.displayGrid, R: Rg, R2: gsp ? gsp.Rp : null, name: ev.name, F: ev.score, layers: ev.layers.length, design: ev.layers, best: false };
       let bi = -1; run.ghosts.forEach((g, i) => { if (g && (bi < 0 || g.F < run.ghosts[bi].F)) bi = i; }); run.ghosts.forEach((g, i) => { if (g) g.best = i === bi; });
       spectrum.set({ ghosts: run.ghosts.filter(Boolean).map((g) => g) });
+      const st = run.starts[ev.index];
+      if (st) { st.running = false; st.done = true; st.history.push({ F: ev.F, mark: 'done' }); }
+      run.starts.forEach((x, i) => { x.best = i === bi; });
+      if (run.exploreIndex === ev.index) run.exploreIndex = null;
+      meritChart.set({ starts: run.starts });
       const li = $(`explore-${ev.index}`);
       if (li) { li.classList.remove('running'); li.querySelector('.f').textContent = `F ${fmt.sci(ev.score)}`; li.querySelector('.l').textContent = `${ev.layers.length} L`; li.title = `${ev.summary ? ev.summary.headline + ' — ' : ''}${ev.reason}`; }
       logEntry('explore', `Start «${ev.name}»: ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>${ev.Fdense != null ? ` (dense ${fmt.sci(ev.Fdense)})` : ''} — ${ev.summary ? ev.summary.headline.toLowerCase() : ev.reason.toLowerCase()}, ${(ev.elapsedMs / 1000).toFixed(1)} s.`);
@@ -727,9 +761,10 @@ function startExploration() {
       const runner = ev.results[1];
       logEntry('explore', `Best starting design by the score max(F, F<sub>dense</sub>): «${best.name}» (score ${fmt.sci(best.score)}, ${best.layers.length} layers)${runner ? `; runner‑up «${runner.name}» ${fmt.sci(runner.score)}` : ''}. Replaying its evolution from the start.`);
       run.startName = best.name; run.exploreRanked = ev.results;
-      startLabel(`${ev.results.length} designs explored → winner «${best.name}» (F = ${fmt.sci(best.F)}, ${best.layers.length} layers), now replayed`, true);
-      document.querySelector('#card-stats .tiles').hidden = false; $('btn-starts').hidden = false; $('explore-list').classList.remove('exploring');
-      run.exploreLabel = null; run.cycle = 0;
+      startLabel(`winner «${best.name}» (F = ${fmt.sci(best.F)}, ${best.layers.length} layers) replayed from its starting design`, true);
+      $('multi-label').textContent = `${ev.results.length} explored · winner «${best.name}»`;
+      $('btn-starts').hidden = false; run.exploreLabel = null; run.cycle = 0; run.exploreIndex = null;
+      run.dense = null; run.history = []; meritChart.set({ history: run.history, starts: run.starts, highlight: null });
       // restore the optimization grid shown on the chart (previews may have enriched their own grids) and switch to the solid synthesis curve
       const pb = buildProblem(); run.problem = { grid: pb.grid, target: pb.target, weights: pb.weights }; run.added = new Set();
       spectrum.set({ grid: pb.grid, target: pb.target, weights: pb.weights, added: run.added, preview: false });

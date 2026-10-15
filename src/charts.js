@@ -629,20 +629,26 @@ export class StructureChart extends Plot {
 export class MeritChart extends Plot {
   constructor(canvas) {
     super(canvas, { l: 60, r: 14, t: 14, b: 30 });
-    this.state = { history: [], targetF: 1e-4 };
+    // history: the synthesis shown on the dashboard (a single start, or the replay of the multi‑start winner);
+    // starts: multi‑start — one history per starting design, indexed like the starts list
+    // ({ history, name, running, best, done }); highlight: the index of the start hovered in the list
+    this.state = { history: [], targetF: 1e-4, starts: null, highlight: null };
   }
   set(patch) { Object.assign(this.state, patch); this.requestDraw(); }
   draw() {
     const ctx = this.begin(), T = theme(), s = this.state, fr = this.frame();
     const h = s.history;
-    const n = Math.max(2, h.length);
+    const starts = (s.starts || []).filter((st) => st && st.history && st.history.length);
+    let n = Math.max(2, h.length);
+    for (const st of starts) n = Math.max(n, st.history.length);
     const xs = lin(0, n - 1, fr.x0, fr.x1);
     let lo = s.targetF, hi = s.targetF * 10;
-    for (const p of h) { if (p.F > 0) { lo = Math.min(lo, p.F); hi = Math.max(hi, p.F); } }
+    const scan = (arr) => { for (const p of arr) if (p.F > 0) { lo = Math.min(lo, p.F); hi = Math.max(hi, p.F); } };
+    scan(h); for (const st of starts) scan(st.history);
     lo = Math.pow(10, Math.floor(Math.log10(lo)) - 0.2); hi = Math.pow(10, Math.ceil(Math.log10(hi)) + 0.1);
     const ys = lin(Math.log10(lo), Math.log10(hi), fr.y1, fr.y0);
     const ticks = []; for (let e = Math.ceil(Math.log10(lo)); e <= Math.floor(Math.log10(hi)); e++) ticks.push(e);
-    const stepT = Math.max(1, Math.ceil(ticks.length / 5));
+    const stepT = Math.max(1, Math.ceil(ticks.length / Math.max(2, Math.floor((fr.y1 - fr.y0) / 26))));
     const yt = { ticks: ticks.filter((_, i) => i % stepT === 0), scale: ys };
     const xt = { ticks: niceTicks(0, n - 1, Math.max(2, Math.floor((fr.x1 - fr.x0) / 70))).filter(Number.isInteger), scale: xs };
     this.axes(ctx, fr, xt, yt, (v) => fmtNum(v), (e) => `10${sup(e)}`, 'event', 'F');
@@ -650,25 +656,54 @@ export class MeritChart extends Plot {
     const yT = Math.round(ys(Math.log10(s.targetF))) + 0.5;
     ctx.strokeStyle = T.good; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(fr.x0, yT); ctx.lineTo(fr.x1, yT); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = T.good; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText('target', fr.x1 - 2, yT - 2);
-    if (!h.length) return;
+    if (!h.length && !starts.length) return;
     ctx.save(); ctx.beginPath(); ctx.rect(fr.x0, fr.y0, fr.x1 - fr.x0, fr.y1 - fr.y0); ctx.clip();
-    ctx.beginPath();
-    h.forEach((p, i) => { const x = xs(i), y = ys(Math.log10(Math.max(p.F, lo))); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
-    ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
-    // grid enrichment: the merit changes its definition — a vertical marker separates the two grids
-    h.forEach((p, i) => {
-      if (p.mark !== 'grid') return;
-      const x = Math.round(xs(i)) + 0.5;
-      ctx.strokeStyle = T['ink-3']; ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, fr.y0); ctx.lineTo(x, fr.y1); ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = T['ink-3']; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.font = `10px ${T.font}`; ctx.fillText('grid +', x + 3, fr.y0 + 2); ctx.font = `11px ${T.font}`;
-    });
-    h.forEach((p, i) => {
-      if (!p.mark || p.mark === 'grid') return;
-      const x = xs(i), y = ys(Math.log10(Math.max(p.F, lo)));
-      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
-      ctx.fillStyle = p.mark === 'needle' ? T.needle : p.mark === 'growth' ? T['series-current'] : p.mark === 'cleanup' ? T['ink-3'] : T.good;
-      ctx.fill(); ctx.strokeStyle = T.card; ctx.lineWidth = 1.5; ctx.stroke();
-    });
+    const path = (arr) => { ctx.beginPath(); arr.forEach((p, i) => { const x = xs(i), y = ys(Math.log10(Math.max(p.F, lo))); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); };
+    ctx.lineJoin = 'round';
+    // multi‑start: every explored start as its own line — finished starts grey, the leader green, the start being
+    // explored in the accent colour, the hovered one orange on top (the same language as the spectrum ghosts)
+    if (starts.length) {
+      const all = (s.starts || []).map((st, i) => [st, i]).filter(([st]) => st && st.history && st.history.length);
+      const order = all.sort(([a, ia], [b, ib]) => (a.best ? 1 : 0) - (b.best ? 1 : 0) || (a.running ? 1 : 0) - (b.running ? 1 : 0) || (ia === s.highlight ? 1 : 0) - (ib === s.highlight ? 1 : 0));
+      for (const [st, i] of order) {
+        path(st.history);
+        const hl = i === s.highlight;
+        if (hl) { ctx.strokeStyle = T.needle; ctx.lineWidth = 2.5; ctx.globalAlpha = 1; }
+        else if (st.running) { ctx.strokeStyle = T.accent; ctx.lineWidth = 2; ctx.globalAlpha = 1; }
+        else if (st.best) { ctx.strokeStyle = T.good; ctx.lineWidth = 1.75; ctx.globalAlpha = 0.9; }
+        else { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 1.25; ctx.globalAlpha = 0.45; }
+        ctx.stroke(); ctx.globalAlpha = 1;
+        if (hl || st.running) {
+          const last = st.history[st.history.length - 1], x = xs(st.history.length - 1), y = ys(Math.log10(Math.max(last.F, lo)));
+          ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fillStyle = hl ? T.needle : T.accent; ctx.fill();
+        }
+      }
+      const hl = s.highlight != null && s.starts[s.highlight] && s.starts[s.highlight].history.length ? s.starts[s.highlight] : null;
+      if (hl && fr.y1 - fr.y0 > 80) {
+        const last = hl.history[hl.history.length - 1];
+        // bottom‑left corner: the histories start at the top left and end at the bottom right
+        ctx.fillStyle = T.ink; ctx.font = `600 11px ${T.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+        ctx.fillText(`${hl.name} · F = ${fmt.sci(last.F)} · ${hl.history.length - 1} events`, fr.x0 + 6, fr.y1 - 3); ctx.font = `11px ${T.font}`;
+      }
+    }
+    if (h.length) {
+      path(h);
+      ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2; ctx.stroke();
+      // grid enrichment: the merit changes its definition — a vertical marker separates the two grids
+      h.forEach((p, i) => {
+        if (p.mark !== 'grid') return;
+        const x = Math.round(xs(i)) + 0.5;
+        ctx.strokeStyle = T['ink-3']; ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, fr.y0); ctx.lineTo(x, fr.y1); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = T['ink-3']; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.font = `10px ${T.font}`; ctx.fillText('grid +', x + 3, fr.y0 + 2); ctx.font = `11px ${T.font}`;
+      });
+      h.forEach((p, i) => {
+        if (!p.mark || p.mark === 'grid') return;
+        const x = xs(i), y = ys(Math.log10(Math.max(p.F, lo)));
+        ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = p.mark === 'needle' ? T.needle : p.mark === 'growth' ? T['series-current'] : p.mark === 'cleanup' ? T['ink-3'] : T.good;
+        ctx.fill(); ctx.strokeStyle = T.card; ctx.lineWidth = 1.5; ctx.stroke();
+      });
+    }
     ctx.restore();
   }
 }

@@ -82,9 +82,11 @@ evidence: [docs/VERIFICATION.md](docs/VERIFICATION.md).
    enrichment) — then the
    tiles and the event log (folded to the last five events; every needle
    step lists the refined alternatives), check the final needle‑derivative
-   verdict on its chart, hover the starts list to compare the explored
-   starting designs on the spectrum, open the **Layer table** (Coating
-   structure card) or the **Starts** ranking, and **Export Excel** to download the target and
+   verdict on its chart, hover the starts list in the **Multi‑start** card
+   to compare the explored starting designs on the spectrum, the structure
+   and the merit history (one history per start), open the **Layer table**
+   (Coating structure card) or the **Ranking** of the starts, and **Export
+   Excel** to download the target and
    synthesized spectra, the coating parameters, the dense‑grid verification,
    the termination summary and the multi‑start ranking.
 

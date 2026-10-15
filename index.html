@@ -183,10 +183,9 @@
 
   <aside class="rail" id="rail">
     <article class="card" id="card-stats">
-      <header><h3>Synthesis</h3><span class="muted" id="cycle-label">—</span><span class="timer" id="t-elapsed" title="Elapsed synthesis time (pauses with the run)">0:00.0</span><button type="button" class="link" id="btn-starts" hidden>Starts</button></header>
+      <header><h3>Synthesis</h3><span class="muted" id="cycle-label">—</span><span class="timer" id="t-elapsed" title="Elapsed synthesis time (pauses with the run)">0:00.0</span></header>
       <p class="start-label" id="start-label"></p>
       <div class="result" id="result-line" aria-live="polite"></div>
-      <ol class="starts-list" id="explore-list" hidden></ol>
       <div class="tiles">
         <div class="tile"><span class="k">Merit F</span><strong id="t-merit">—</strong><span class="sub" id="t-merit-sub">mean square</span></div>
         <div class="tile"><span class="k">RMS error</span><strong id="t-rms">—</strong><span class="sub" id="t-maxdev">max —</span></div>
@@ -196,8 +195,24 @@
       <div class="progress"><div class="bar" id="progress-bar"></div></div>
     </article>
 
+    <article class="card" id="card-multistart" hidden>
+      <header>
+        <h3>Multi‑start</h3><span class="muted" id="multi-label">—</span>
+        <button type="button" class="link" id="btn-starts" hidden title="Every explored starting design with its score, merit, layers and termination">Ranking</button>
+      </header>
+      <ol class="starts-list" id="explore-list" title="Hover a start to see its spectrum, structure and merit history on the charts"></ol>
+    </article>
+
     <article class="card" id="card-merit">
-      <header><h3>Merit function history</h3><span class="muted">log scale</span></header>
+      <header>
+        <h3>Merit function history</h3><span class="muted">log scale</span>
+        <div class="legend" id="merit-legend" hidden>
+          <span class="legend-item" title="Merit history of a finished starting design (hover the Multi‑start list to highlight one)"><i class="swatch ghost"></i>Start</span>
+          <span class="legend-item" title="The start being explored"><i class="swatch line-accent"></i>Exploring</span>
+          <span class="legend-item" title="The best start so far by its score"><i class="swatch line-good"></i>Leader</span>
+          <span class="legend-item" title="The winner replayed on the dashboard"><i class="swatch current"></i>Replay</span>
+        </div>
+      </header>
       <div class="plot"><canvas id="merit"></canvas></div>
     </article>
 
