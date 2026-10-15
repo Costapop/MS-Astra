@@ -109,6 +109,7 @@ Serve the files over HTTP (the application uses JavaScript modules).
 - `src/charts.js` — canvas charts: interactive target editor, needle derivative, coating structure, merit history.
 - `src/app.js` — settings, runner with demonstration pacing and animation, export.
 - `src/xlsx.js` — dependency‑free Excel writer.
+- `scripts/research/` — research prototypes that do not ship with the application: the strengthened final phase proposed for 2.4.0 and the audit of the stopping criteria (see [docs/PROPOSAL-final-phase.md](docs/PROPOSAL-final-phase.md)).
 - `tests/` — verification against closed forms (Fresnel, Brewster, quarter‑wave stacks), an independent complex Abelès‑matrix code at normal and oblique incidence, finite differences, the specification's worked example and the book's designs.
 
 Release notes: [docs/RELEASE-v2.3.1.md](docs/RELEASE-v2.3.1.md), [v2.3.0](docs/RELEASE-v2.3.0.md), [v2.2.2](docs/RELEASE-v2.2.2.md), [v2.2.1](docs/RELEASE-v2.2.1.md), [v2.2.0](docs/RELEASE-v2.2.0.md), [v2.1.3](docs/RELEASE-v2.1.3.md), [v2.1.1](docs/RELEASE-v2.1.1.md), [v2.1.0](docs/RELEASE-v2.1.0.md), [v2.0.0](docs/RELEASE-v2.0.0.md). The source
