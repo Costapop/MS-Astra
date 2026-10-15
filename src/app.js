@@ -367,6 +367,7 @@ function updateTilesEntry({ F, layers, stage }) {
   $('t-layers').textContent = String(layers.length); $('t-layers-sub').textContent = `of ${settings.maxLayers} max`;
   $('t-tot').textContent = `${tot.toFixed(0)} nm`; $('t-tot-sub').textContent = `of ${settings.maxTOT} nm max · ${(tot / (settings.lambdaMin + settings.lambdaMax) * 8).toFixed(1)} QWOT`;
   $('t-merit-sub').textContent = `target ${settings.targetMerit.toExponential(0)} · ${run.problem ? run.problem.grid.length : settings.points} points`;
+  for (const el of document.querySelectorAll('#card-stats .tile .sub')) el.title = el.textContent;   // the note is one line; the full text in the tooltip
   if (run.F0 && settings.targetMerit < run.F0) {
     const p = Math.max(0, Math.min(1, Math.log(run.F0 / Math.max(F, 1e-300)) / Math.log(run.F0 / settings.targetMerit)));
     $('progress-bar').style.width = `${(100 * p).toFixed(1)}%`;

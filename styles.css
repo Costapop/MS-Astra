@@ -150,7 +150,7 @@ a:hover { text-decoration: underline; }
 .dashboard { grid-template-areas: "spectrum" "needle" "structure"; }
 .rail { grid-template-areas: "stats" "merit" "log"; }
 /* multi-start: a fourth card (the starts and their status) under Synthesis */
-.rail.multi { grid-template-rows: minmax(190px, 1fr) minmax(150px, 0.95fr) minmax(150px, 1fr) minmax(90px, 0.6fr); grid-template-areas: "stats" "multistart" "merit" "log"; overflow-y: auto; overflow-x: hidden; }
+.rail.multi { grid-template-rows: minmax(258px, 1fr) minmax(150px, 0.95fr) minmax(150px, 1fr) minmax(90px, 0.6fr); grid-template-areas: "stats" "multistart" "merit" "log"; overflow-y: auto; overflow-x: hidden; }   /* 258 px: header, label, 2 × 2 tiles and the progress bar whole */
 #card-merit > header { row-gap: 2px; }
 #card-spectrum { grid-area: spectrum; }
 #card-stats { grid-area: stats; }
@@ -230,8 +230,9 @@ a:hover { text-decoration: underline; }
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 4px 16px; }
 .tile { background: color-mix(in srgb, var(--control) 55%, transparent); border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .tile .k { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+.tile .k .short { display: none; }
 .tile strong { font-size: clamp(15px, 1.35vw, 22px); font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tile .sub { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.tile .sub { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* one line: the tile height never depends on the text */
 .progress { margin: 10px 16px 6px; height: 6px; border-radius: 3px; background: var(--control); overflow: hidden; }
 .progress .bar { height: 100%; width: 0; background: var(--accent); border-radius: 3px; transition: width .4s ease; }
 .result { margin: 0 16px 8px; padding: 10px 12px; font-size: 12px; color: var(--ink-2); display: flex; flex-direction: column; gap: 6px; flex: none; background: color-mix(in srgb, var(--control) 55%, transparent); border-radius: 14px; line-height: 1.45; }
@@ -362,6 +363,19 @@ dialog.sheet header { display: flex; align-items: center; justify-content: space
   .card > header { padding: 9px 14px 4px; }
   .legend { font-size: 11px; gap: 9px; }
   .progress { margin: 8px 16px 4px; }
+}
+/* short windows: the four tiles stay whole in the Synthesis card during a run (one line each: label, number, note) */
+@media (max-height: 760px) {
+  .tile { padding: 5px 9px; gap: 0; border-radius: 10px; }
+  .tile .k { font-size: 10px; white-space: nowrap; }
+  .tile .k .long { display: none; }
+  .tile .k .short { display: inline; }
+  .tile strong { font-size: 15px; }
+  .tile .sub { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tiles { gap: 6px; padding: 2px 12px; }
+  .start-label { margin-bottom: 3px; }
+  .progress { margin: 6px 12px 4px; }
+  .rail.multi { grid-template-rows: minmax(206px, 1fr) minmax(150px, 0.95fr) minmax(150px, 1fr) minmax(90px, 0.6fr); }
 }
 @media (max-width: 900px) { .panel { grid-template-columns: 1fr; } }
 @media (max-width: 1400px) {

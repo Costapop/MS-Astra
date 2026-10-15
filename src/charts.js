@@ -443,7 +443,13 @@ export class NeedleChart extends Plot {
     let i = 0, bd = Infinity;
     for (let k = 0; k < s.scan.z.length; k++) { const d = Math.abs(s.scan.z[k] - z); if (d < bd) { bd = d; i = k; } }
     const j = s.scan.layer[i]; const lay = s.layers[j];
-    this.tooltip.innerHTML = `<b>z = ${s.scan.z[i].toFixed(1)} nm</b><br>Layer ${j + 1} (${lay ? lay.m : '—'})<br>g = ${(s.scan.g[i] / unit).toFixed(3)} ×10${sup(Math.log10(unit))} nm⁻¹`;
+    let tested = '';
+    if (s.annotations && s.annotations.length) {
+      let best = null, bd = 10;
+      for (const a of s.annotations) { const d = Math.abs(xs(a.z) - px); if (d < bd) { bd = d; best = a; } }
+      if (best) tested = `<br>Tested insertion at z = ${best.z.toFixed(1)} nm: ${best.label}`;
+    }
+    this.tooltip.innerHTML = `<b>z = ${s.scan.z[i].toFixed(1)} nm</b><br>Layer ${j + 1} (${lay ? lay.m : '—'})<br>g = ${(s.scan.g[i] / unit).toFixed(3)} ×10${sup(Math.log10(unit))} nm⁻¹${tested}`;
     this.tooltip.hidden = false;
     const tw = this.tooltip.offsetWidth; let x = px + 14; if (x + tw > this.w - 4) x = px - tw - 14;
     this.tooltip.style.left = `${x}px`; this.tooltip.style.top = `${Math.max(4, py - 54)}px`;
@@ -501,19 +507,14 @@ export class NeedleChart extends Plot {
       ctx.fillStyle = T['needle-fill']; ctx.fillRect(x0, fr.y0, Math.max(2, x1 - x0), fr.y1 - fr.y0);
       ctx.strokeStyle = T.needle; ctx.lineWidth = 1; ctx.strokeRect(Math.round(x0) + 0.5, fr.y0 + 0.5, Math.max(2, x1 - x0), fr.y1 - fr.y0 - 1);
     }
-    // final-state annotations: tested insertions with their refined ΔF
+    // final-state annotations: the tested insertions as rings (green: a refined gain, red: none) — no text in the
+    // plot area; the refined ΔF of a ring is in the tooltip, the verdict in the strip above, the table in the log
     if (s.annotations && s.annotations.length) {
-      s.annotations.forEach((a, ai) => {
+      for (const a of s.annotations) {
         const x = xs(a.z), y = ys(a.g / unit);
-        const below = ai % 2 === 1;
-        ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fillStyle = T.card; ctx.fill();
+        ctx.beginPath(); ctx.arc(x, y, 5.5, 0, Math.PI * 2); ctx.fillStyle = T.card; ctx.fill();
         ctx.strokeStyle = a.gain ? T.good : T.bad; ctx.lineWidth = 2; ctx.stroke();
-        ctx.fillStyle = T.ink; ctx.font = `600 10px ${T.font}`; ctx.textBaseline = below ? 'top' : 'bottom';
-        const tw = ctx.measureText(a.label).width; let lx = x; ctx.textAlign = 'center';
-        if (lx - tw / 2 < fr.x0 + SUB_W) { lx = fr.x0 + SUB_W + tw / 2 + 2; } if (lx + tw / 2 > fr.x1) { lx = fr.x1 - tw / 2 - 2; }
-        ctx.fillText(a.label, lx, below ? y + 9 : y - 9);
-        ctx.font = `11px ${T.font}`;
-      });
+      }
     }
     if (s.banner) {
       ctx.font = `600 11px ${T.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
@@ -549,7 +550,7 @@ export class NeedleChart extends Plot {
 /* ===================================================================== */
 export class StructureChart extends Plot {
   constructor(canvas, tooltip) {
-    super(canvas, { l: 66, r: 18, t: 16, b: 34 });
+    super(canvas, { l: 66, r: 18, t: 18, b: 34 });   // the top margin holds the layer count and the total thickness
     this.tooltip = tooltip;
     this.state = { xmax: 1, layers: [], nmax: 2.5, highlight: null, substrate: 'BK7', ns: 1.52, ambient: 'air', na: 1 };
     canvas.addEventListener('pointermove', (e) => this.onMove(e));
@@ -620,8 +621,9 @@ export class StructureChart extends Plot {
     }
     ctx.fillStyle = T['ink-3']; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     if (xs(z) + 36 < fr.x1) ctx.fillText(s.ambient || 'air', xs(z) + 8, (fr.y0 + fr.y1) / 2);
-    ctx.fillStyle = T['ink-3']; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
-    ctx.fillText(`${s.layers.length} layer${s.layers.length === 1 ? '' : 's'} · ${fmtNum(z, 0)} nm`, fr.x1, fr.y0 + 2);
+    // layer count and total thickness in the strip above the bars (never over a bar or its label)
+    ctx.fillStyle = T['ink-3']; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+    ctx.fillText(`${s.layers.length} layer${s.layers.length === 1 ? '' : 's'} · ${fmtNum(z, 0)} nm`, fr.x1, fr.y0 - 3);
   }
 }
 
