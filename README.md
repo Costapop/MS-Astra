@@ -8,8 +8,8 @@ process live: thickness refinement, needle insertion, deliberate thickness
 growth (gradual evolution), thin‑layer cleanup and final optimization. It is
 built for demonstrations — the charts are large, animated and arranged as a
 single engineering dashboard: everything the user enters on the left, the
-three charts of the synthesis (reflectance spectrum, needle derivative,
-coating structure) stacked in the centre so that all of them stay in view
+three charts of the synthesis (reflectance spectrum, coating structure,
+needle derivative) stacked in the centre so that all of them stay in view
 while a run is animated, and the state of the run (verdict, tiles, merit
 history, event log) on the right; the inputs fold into a strip (*Hide* /
 *Show inputs*) when the charts need the width — and it runs entirely in the
