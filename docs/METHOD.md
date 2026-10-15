@@ -1,4 +1,4 @@
-# MS Astra 2.3.1 — mathematical method
+# MS Astra 2.3.2 — mathematical method
 
 This document records the exact formulas implemented in `src/optics.js`,
 `src/refine.js` and `src/synthesis.js`. The formalism follows
@@ -307,10 +307,22 @@ The final phase proceeds in three steps:
    by cleanup and refinement, for up to six rounds while something changes;
    the archive is consulted again at the end.
 
+Every refinement of the final phase (v2.3.2) uses the thin‑layer threshold
+as a **lower bound** on every thickness (`refine` with `minThickness`:
+active‑set projection onto `d_j ≥ d_min`, a start below the bound is lifted
+to it), so a reported design can never be driven below the threshold by the
+last refinement; a layer left pinned at the bound is then tested for removal
+(neighbours absorb its optical thickness, bounded refinement) and removed
+when the design is better without it. The main loop keeps the free
+refinement `d_j ≥ 0` with the cleanup at the end of each cycle, as the
+method prescribes — thin layers may appear there (a needle starts thin) and
+are shown as intermediate designs. A hard guard before the report repeats
+the cleanup if anything slipped through.
+
 Hence the reported design is the complete design within the limits with the
-lowest merit of all designs the run has evaluated, and it is
-needle‑stationary within the limits (or at the target, or the run was
-budget‑limited). The engine verifies this with three self‑checks (no layer
+lowest merit of all designs the run has evaluated — every layer at least the
+threshold — and it is needle‑stationary within the limits (or at the target,
+or the run was budget‑limited). The engine verifies this with three self‑checks (no layer
 below the threshold; reported `F` ≤ the archive minimum and ≤ the completed
 terminal design; no admissible needle — within the layer and thickness
 limits, complete after cleanup — lowers the reported merit), and the

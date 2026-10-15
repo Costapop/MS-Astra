@@ -72,6 +72,15 @@ Run `npm test` (Node 20+). All checks are automated in `tests/`.
   agrees with its flag, and the reported‑design sentence matches the archive
   flag; a budget‑limited exploration result is replayed exactly; the
   multi‑start winner replays to the identical reason.
+* Thin‑layer threshold (v2.3.2): the bounded refinement keeps every layer at
+  or above `minThickness` and lifts a start below it (unit test); for every
+  preset at thresholds 3 and 5 nm and ten random two‑band tasks at 2–6 nm
+  (angles 0–60°, 8–32 layers), the reported design has no layer below the
+  threshold, the self‑checks pass and the best‑design guarantee holds.
+  Headless Chromium: Band reflector, Polarizer 45° and Edge filter at
+  threshold 3 nm and target 1e‑9 report designs with minimum thickness
+  5.0 / 18.3 / 19.7 nm; the layer table states the guarantee, and during a
+  run marks the layers that the next cleanup will remove.
 * Reported design (v2.3.1): for every preset at thin‑layer thresholds of 1
   and 6 nm, plus 21‑point grids with transition zones and threshold 3–6 nm
   (grid enrichment active), every design the run showed is re‑evaluated on

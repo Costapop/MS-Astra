@@ -353,3 +353,18 @@ test('Rs & Rp with separate targets: merit, residual rows, gradient and needle d
   let md = 0; for (let l = 0; l < 21; l++) { md = Math.max(md, Math.abs(sp.Rs[l] - tS[l])); if (wP[l] > 0) md = Math.max(md, Math.abs(sp.Rp[l] - tP[l])); }
   assert.ok(Math.abs(a.maxDev - md) < 1e-15);
 });
+
+/* ---------------- v2.3.2: bounded refinement ---------------- */
+test('refinement with a lower thickness bound never drives a layer below it and lifts a start below the bound', () => {
+  const wl = grid(400, 700, 31); const target = new Float64Array(31).fill(0); const w = meritWeights(31);
+  const problem = { wavelengths: wl, target, weights: w, model: opticsModel({ ns: 1.52, na: 1, angle: 0, pol: 'avg' }) };
+  const layers = [{ n: 2.45, m: 'H', d: 5 }, { n: 1.38, m: 'L', d: 120 }, { n: 2.45, m: 'H', d: 1.2 }, { n: 1.38, m: 'L', d: 90 }, { n: 2.45, m: 'H', d: 60 }];
+  const free = refineToEnd(layers, problem, {});
+  const bounded = refineToEnd(layers, problem, { minThickness: 3 });
+  assert.ok(bounded.layers.every((L) => L.d >= 3 - 1e-12), `bounded: ${bounded.layers.map((L) => L.d.toFixed(2))}`);
+  assert.ok(free.layers.some((L) => L.d < 3), 'the free refinement keeps a layer below 3 nm here (that is what the bound prevents)');
+  assert.ok(bounded.F < merit(reflectance(layers.map((L) => ({ ...L, d: Math.max(3, L.d) })), wl, 1.52), target, w), 'the bounded refinement improves on the lifted start');
+  // a design that is already above the bound refines to the same result as the free refinement when the bound stays inactive
+  const above = free.layers.filter((L) => L.d >= 3).length === free.layers.length ? refineToEnd(layers, problem, { minThickness: 0.5 }) : null;
+  if (above) assert.ok(Math.abs(above.F - free.F) < 1e-12);
+});

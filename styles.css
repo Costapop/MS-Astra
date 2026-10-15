@@ -304,6 +304,8 @@ dialog.sheet header { display: flex; align-items: center; justify-content: space
 #recipe th, #recipe td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--line); }
 #recipe th:first-child, #recipe td:first-child, #recipe th:nth-child(2), #recipe td:nth-child(2) { text-align: left; }
 #recipe th { color: var(--ink-3); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; position: sticky; top: 0; background: var(--card); }
+#recipe caption { caption-side: top; text-align: left; font-size: 12px; color: var(--ink-3); padding: 0 0 8px; }
+#recipe tr.thin td { color: var(--bad); }
 
 /* ---------- responsive ---------- */
 @media (max-height: 820px) {
