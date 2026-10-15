@@ -9,7 +9,7 @@ import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
 
-export const VERSION = '2.3.0';
+export const VERSION = '2.3.1';
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------------ */
@@ -493,7 +493,8 @@ function applyEvent(ev, snap, opts = {}) {
       view.goalR = ev.R; view.R = Float64Array.from(ev.R);
       layersFromEvent(ev.layers, { animate: !snap });
       updateTiles({ F: ev.F, layers: ev.layers });
-      log('grid', `Grid enriched: +${ev.added.length} spectral points where the dense check found the largest errors (${ev.added.map((w) => w.toFixed(1)).join(', ')} nm) → ${ev.wavelengths.length} points. F on the new grid = ${fmt.sci(ev.F)}.`);
+      pushHistory(ev.F, 'grid');
+      log('grid', `Grid enriched: +${ev.added.length} spectral points where the dense check found the largest errors (${ev.added.map((w) => w.toFixed(1)).join(', ')} nm) → ${ev.wavelengths.length} points. F on the new grid = ${fmt.sci(ev.F)} — earlier values on the history chart were measured on the coarser grid.`);
       break;
     }
     case 'scan': {
@@ -533,7 +534,7 @@ function applyEvent(ev, snap, opts = {}) {
       pushHistory(ev.F, 'needle');
       updateTiles({ F: ev.F, layers: ev.layers });
       const where = c.kind === 'interior' ? `inside layer ${c.layer + 1}` : c.kind === 'substrate' ? 'at the substrate' : 'at the outer surface';
-      log('needle', `Needle of ${ev.material} inserted ${where}, z = <span class="v">${c.z.toFixed(1)} nm</span>, width ${ev.eta.toFixed(2)} nm · g = ${c.g.toExponential(2)} nm⁻¹ · F ${fmt.sci(ev.Fparent)} → ${fmt.sci(ev.F)}${ev.alternatives > 1 ? ` · best of ${ev.alternatives} refined alternatives` : ''}.`);
+      log('needle', `${ev.final ? 'Final phase: n' : 'N'}eedle of ${ev.material} inserted ${where}, z = <span class="v">${c.z.toFixed(1)} nm</span>, width ${ev.eta.toFixed(2)} nm · g = ${c.g.toExponential(2)} nm⁻¹ · F ${fmt.sci(ev.Fparent)} → ${fmt.sci(ev.F)}${ev.alternatives > 1 ? ` · best of ${ev.alternatives} refined alternatives` : ''}.`);
       break;
     }
     case 'needle-rejected': {
@@ -560,7 +561,7 @@ function applyEvent(ev, snap, opts = {}) {
       pushHistory(ev.F, 'cleanup');
       updateTiles({ F: ev.F, layers: ev.layers });
       needle.set({ stale: true, candidate: null, insertion: null });
-      log('cleanup', `${ev.removed} thin layer${ev.removed > 1 ? 's' : ''} (< ${settings.thinLayer} nm) removed; ${ev.before.length} → ${ev.layers.length} layers · F = ${fmt.sci(ev.F)} before re‑optimization.`);
+      log('cleanup', `${ev.final ? 'Final phase: ' : ''}${ev.removed} thin layer${ev.removed > 1 ? 's' : ''} (< ${settings.thinLayer} nm) removed; ${ev.before.length} → ${ev.layers.length} layers · F = ${fmt.sci(ev.F)} before re‑optimization.`);
       break;
     }
     case 'note': { log('note', ev.text); break; }
@@ -600,7 +601,7 @@ function applyEvent(ev, snap, opts = {}) {
       const failed = checks.filter((c) => !c.ok);
       if (checks.length) log(failed.length ? 'check bad' : 'check', `Termination reason self‑check: ${failed.length ? `${failed.length} of ${checks.length} checks failed` : `all ${checks.length} checks passed`}.<table class="cmp"><tr><th>check</th><th>result</th><th>detail</th></tr>${checks.map((c) => `<tr><td>${c.name}</td><td>${c.ok ? '✓' : '✗'}</td><td>${c.detail || ''}</td></tr>`).join('')}</table>`);
       const factsTable = ev.stop && ev.stop.summary ? `<table class="cmp"><tr><th>stopping condition</th><th>holds</th><th>detail</th></tr>${ev.stop.summary.facts.map((f) => `<tr class="${f.decisive ? 'chosen' : ''}"><td>${f.label}${f.decisive ? ' (decisive)' : ''}</td><td>${f.hit ? '●' : '○'}</td><td style="text-align:left">${f.text}</td></tr>`).join('')}</table>` : '';
-      log('done', `<b>${headline}.</b> ${ev.reason}. ${verdict.selectionText} Reported: ${ev.stop && ev.stop.summary ? ev.stop.summary.reported : 'final design'} — ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>${ev.dense ? `, dense‑grid F = ${fmt.sci(ev.dense.F)}` : ''}. Needles ${ev.stats.needles} (of ${ev.stats.compared} refined alternatives), growth steps ${ev.stats.growths}, thin layers removed ${ev.stats.cleanups}${ev.stats.pointsAdded ? `, grid points added ${ev.stats.pointsAdded}` : ''}, ${(ev.elapsedMs / 1000).toFixed(1)} s of computation.${factsTable}`);
+      log('done', `<b>${headline}.</b> ${ev.reason}. ${verdict.selectionText} Reported: ${ev.stop && ev.stop.summary ? ev.stop.summary.reported : 'final design'} — ${ev.layers.length} layers, F = <span class="v">${fmt.sci(ev.F)}</span>${ev.dense ? `, dense‑grid F = ${fmt.sci(ev.dense.F)}` : ''}.${ev.stop && ev.stop.summary && ev.stop.summary.guarantee ? ` ${ev.stop.summary.guarantee}` : ''} Needles ${ev.stats.needles} (of ${ev.stats.compared} refined alternatives), growth steps ${ev.stats.growths}, thin layers removed ${ev.stats.cleanups}${ev.stats.pointsAdded ? `, grid points added ${ev.stats.pointsAdded}` : ''}, ${(ev.elapsedMs / 1000).toFixed(1)} s of computation.${factsTable}`);
       $('btn-run').textContent = 'Start synthesis'; $('btn-export').disabled = false; $('btn-step').disabled = true;
       unlockSidebar();
       break;
@@ -637,7 +638,8 @@ function buildVerdict(ev) {
   const html = `<div class="line"><span class="tag stop">Stopped</span><b>${s ? s.headline : ev.reason}</b>${s ? ` — ${s.detail}` : ''}. ${checkHtml}</div>
     ${facts ? `<ul class="facts">${facts}</ul>` : ''}
     <div class="line"><span class="tag${multi ? ' multi' : ''}">Why this design</span>${selectionHtml}</div>
-    <div class="line"><span class="tag">Reported</span>${numbers}${s ? ` — ${s.reported}` : ''}.</div>`;
+    <div class="line"><span class="tag">Reported</span>${numbers}${s ? ` — ${s.reported}` : ''}.</div>
+    ${s && s.guarantee ? `<div class="line"><span class="tag best">Best design</span>${s.guarantee}</div>` : ''}`;
   return { html, selectionText, replayMatch };
 }
 

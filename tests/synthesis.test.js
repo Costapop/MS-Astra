@@ -166,8 +166,9 @@ test('every termination reason is backed by the recorded facts of the run', () =
       if (st.growthCapped) assert.match(done.reason, /capped by the optical‑thickness limit/);
     }
     // the archive note appears exactly when the reported design is not the terminal one
-    assert.equal(/best archived/.test(done.reason), !!st.fromArchive, `${key}: archive note mismatch`);
-    if (st.fromArchive) assert.ok(done.F < st.terminal.F, 'archived design is better than the terminal one');
+    assert.equal(/best complete design of the run/.test(done.reason), !!st.fromArchive, `${key}: archive note mismatch`);
+    if (st.fromArchive) assert.ok(done.F <= st.completedTerminal.F, 'the archived design is not worse than the completed terminal one');
+    assert.ok(done.layers.length === 1 || done.layers.every((L) => L.d >= cfg.thinLayer - 1e-9), 'reported design has no thin layer');
     // reported numbers describe the reported design
     assert.ok(done.layers.length <= cfg.maxLayers && done.opticalThickness <= cfg.maxOpticalThickness + 1e-6);
   }
@@ -235,7 +236,8 @@ test('the termination summary names the decisive stopping condition and agrees w
     // the headline is one of the plain-language causes
     assert.match(s.headline, /^(Target merit reached|Optical‑thickness limit reached|Layer limit reached|Needle variations no longer reduce the merit|No further progress|Needle cycle step limit reached|Time budget exhausted|Work budget exhausted|Cycle budget exhausted)/);
     // the reported-design sentence matches the archive flag
-    assert.equal(/best archived/.test(s.reported), !!done.stop.fromArchive);
+    assert.equal(/best complete design of the run/.test(s.reported), !!done.stop.fromArchive);
+    assert.match(s.guarantee, /^Reported F = .* is the lowest merit of any complete design within the limits/);
     // the layer limit excluding interior needles is reported as the cause, never as "no needle lowers the merit"
     if (done.stop.layerLimitPartial) { assert.equal(done.stop.needleStop, 'layer-limit'); assert.ok(done.stop.terminal.layers >= cfg.maxLayers - 1); if (done.stop.kind === 'stagnation') assert.match(done.reason, /blocks needles inside the layers/); }
   }
@@ -322,4 +324,52 @@ test('separate Rs and Rp targets: the 45° polarizer preset (Rs → 98 %, Rp →
   assert.ok(d5.grid.wavelengths.length > 3 && d5.stats.pointsAdded > 0, 'grid enriched');
   const s6 = sampleDualTarget(bS, bP, d5.grid.wavelengths, 0);
   assert.deepEqual(Array.from(d5.grid.target.s), Array.from(s6.target.s)); assert.deepEqual(Array.from(d5.grid.target.p), Array.from(s6.target.p));
+});
+
+
+/* ---------------- v2.3.1: the reported design is the best complete design of the run ---------------- */
+import { meritOf } from '../src/optics.js';
+
+function anyConfig(key, { points = 41, thin = 1, targetMerit = 1e-9, transition = 0 } = {}) {
+  const p = PRESETS[key]; const bands = bandsFromPreset(p), bands2 = bandsFromPreset(p, 'bands2');
+  const wl = uniformGrid(p.range[0], p.range[1], points); const dual = p.pol === 'both' && (p.angle ?? 0) > 0;
+  const s = dual ? sampleDualTarget(bands, bands2, wl, transition) : sampleTarget(bands, wl, transition);
+  const H = materialByKey(p.H), L = materialByKey(p.L);
+  return { wavelengths: wl, target: s.target, weights: s.weights, bands, bands2: dual ? bands2 : null, transition, ns: 1.52, na: p.ambient === 'BK7' ? 1.52 : 1, angle: p.angle ?? 0, pol: p.pol ?? 'avg', materials: { H: { n: H.n, m: H.key }, L: { n: L.n, m: L.key } },
+    start: { material: p.start.material, thickness: p.start.thickness }, maxLayers: Math.min(p.maxLayers, 30), maxOpticalThickness: Math.min(p.maxTOT, 4000), targetMerit, thinLayer: thin, budgetMs: 30000 };
+}
+
+test('the reported design is the best complete design within the limits that the run evaluated, and no admissible needle improves it (thin-layer thresholds 1, 3 and 6 nm, enriched grids, every preset)', () => {
+  const cases = [];
+  for (const key of Object.keys(PRESETS)) cases.push([key, { thin: 1 }], [key, { thin: 6 }]);
+  cases.push(['ar', { thin: 3, points: 21 }], ['bandpass', { thin: 3, points: 21, transition: 20 }], ['edge', { thin: 6, points: 21, transition: 20 }], ['cube', { thin: 6, points: 61 }]);
+  let explained = 0, exploited = 0, archived = 0;
+  for (const [key, opts] of cases) {
+    const cfg = anyConfig(key, opts);
+    const model = opticsModel({ ns: cfg.ns, na: cfg.na, angle: cfg.angle, pol: cfg.pol });
+    const seen = []; let done = null, minShown = Infinity;
+    for (const ev of synthesize(cfg)) {
+      if (['refined', 'needle', 'growth', 'cleanup', 'start'].includes(ev.type)) { seen.push(ev); minShown = Math.min(minShown, ev.F); }
+      if (ev.type === 'refine') minShown = Math.min(minShown, ev.F);
+      if (ev.type === 'done') done = ev;
+    }
+    const tag = `${key} ${JSON.stringify(opts)}`;
+    // every design the run showed, re-evaluated on the final grid: a complete one within the limits is never better than the reported one
+    const g = done.grid; let bestComplete = Infinity;
+    for (const ev of seen) {
+      const complete = ev.layers.every((L) => L.d >= cfg.thinLayer - 1e-9) && ev.layers.length <= cfg.maxLayers && totalOpticalThickness(ev.layers) <= cfg.maxOpticalThickness + 1e-9;
+      if (complete) bestComplete = Math.min(bestComplete, meritOf(ev.layers, g.wavelengths, g.target, g.weights, model));
+    }
+    assert.ok(done.F <= bestComplete * (1 + 1e-9), `${tag}: reported ${done.F} but a complete design with ${bestComplete} was seen`);
+    assert.ok(done.layers.length === 1 || done.layers.every((L) => L.d >= cfg.thinLayer - 1e-9), `${tag}: reported design has a layer below ${cfg.thinLayer} nm`);
+    assert.ok(done.stop.verified, `${tag}: ${done.stop.checks.filter((c) => !c.ok).map((c) => `${c.name} [${c.detail}]`).join('; ')}`);
+    // the needle fact never leaves an admissible improvement on the table unless the run stopped by the target or by its budget
+    const nf = done.stop.summary.facts.find((f) => f.key === 'needle');
+    if (!['target', 'budget'].includes(done.stop.kind) && !done.stop.exploitBudget && !done.stop.exploitCapped) assert.doesNotMatch(nf.short, /still possible/, `${tag}: ${nf.text}`);
+    // a lower value shown during the run is explained in the guarantee sentence
+    if (minShown < done.F * (1 - 1e-9)) { explained++; assert.match(done.stop.summary.guarantee, /thinner than|coarser grid/, `${tag}: ${done.stop.summary.guarantee}`); }
+    if (done.stop.finalGain) { exploited++; assert.ok(done.stop.finalGain.to < done.stop.finalGain.from && /final phase/.test(done.reason)); }
+    if (done.stop.fromArchive) archived++;
+  }
+  assert.ok(explained >= 2 && archived >= 2, `cases with explained lower values: ${explained}, archived designs: ${archived}, final-phase gains: ${exploited}`);
 });

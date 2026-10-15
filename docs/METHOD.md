@@ -1,4 +1,4 @@
-# MS Astra 2.3 — mathematical method
+# MS Astra 2.3.1 — mathematical method
 
 This document records the exact formulas implemented in `src/optics.js`,
 `src/refine.js` and `src/synthesis.js`. The formalism follows
@@ -283,15 +283,49 @@ the layers and the admissible boundary needles do not lower the merit"),
 never a plain "no needle lowers the merit": the search was restricted, and
 the final needle check reports whether a blocked insertion would still help.
 
-The reported design is the design at termination unless the archive holds a
-feasible design that is better by more than 0.1 % in `F` (gradual evolution
-is non‑monotonic, so the best design is often from an earlier cycle). In
-that case the reason says so explicitly and quotes both designs
-("reported design is the best archived one (cycle k, F = …); the design at
-termination had F = …, N layers, … nm"), so a limit named in the reason always
-refers to the design that hit it. The method does not guarantee a global
-minimum; the result is the outcome of a bounded local search from the chosen
-starting design.
+### 9b. The reported design (v2.3.1)
+
+A design is *complete* when no layer is thinner than the cleanup threshold;
+only complete designs within the layer and optical‑thickness limits can be
+reported, and only such designs are archived. The archive holds every
+complete design within the limits that the run has shown (after each
+refinement, needle insertion, growth step and cleanup) with its merit on the
+current grid; when the grid is enriched every entry is re‑measured, so the
+archive compares designs on the final grid only.
+
+The final phase proceeds in three steps:
+
+1. the design at termination is completed — thin layers removed and the
+   design refined, repeated while the refinement leaves a thin layer — and
+   refined;
+2. the best archived design replaces it when its merit is lower (it is
+   refined once more and kept only as a complete design);
+3. unless the run stopped by the target or by its budget, the regular needle
+   cycle is run on the reported design (candidates judged by their
+   *completed* designs: a needle whose refinement produces a thin layer is
+   accepted only if the design is still better after the cleanup), followed
+   by cleanup and refinement, for up to six rounds while something changes;
+   the archive is consulted again at the end.
+
+Hence the reported design is the complete design within the limits with the
+lowest merit of all designs the run has evaluated, and it is
+needle‑stationary within the limits (or at the target, or the run was
+budget‑limited). The engine verifies this with three self‑checks (no layer
+below the threshold; reported `F` ≤ the archive minimum and ≤ the completed
+terminal design; no admissible needle — within the layer and thickness
+limits, complete after cleanup — lowers the reported merit), and the
+Synthesis card states it in a *Best design* line that also explains the two
+reasons why a lower value may have appeared on the merit history during the
+run: a design with a layer thinner than the threshold (shown before its
+cleanup, which raises the merit) or values measured on the coarser grid
+before enrichment (the history chart marks the enrichment). When the archive
+wins, the reason quotes both designs ("reported design is the best complete
+design of the run (cycle k, F = …); the design at termination had F = …,
+N layers, … nm[, with layers thinner than t nm; after their removal and
+refinement F = …]"), and when the final phase added needles it says so
+("final phase: n needles lowered F from … to …"). The method does not
+guarantee a global minimum; the result is the outcome of a bounded local
+search from the chosen starting design.
 
 ### 9a. Plain‑language summary (v2.2.2)
 

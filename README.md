@@ -66,7 +66,11 @@ evidence: [docs/VERIFICATION.md](docs/VERIFICATION.md).
    reduce the merit, no further progress, budget) with the state of every
    stopping condition, why this design was chosen (for multi‑start: the
    ranking by `max(F, F_dense)` and the runner‑up; the replay is checked
-   against the explored result) and which design is reported — then the
+   against the explored result) and which design is reported — the *Best
+   design* line guarantees it is the lowest‑merit complete design within
+   the limits the run evaluated and explains any lower value seen on the
+   merit history (a thin layer before cleanup, or the coarser grid before
+   enrichment) — then the
    tiles and the event log (folded to the last five events; every needle
    step lists the refined alternatives), check the final needle‑derivative
    verdict on its chart, hover the starts list to compare the explored
@@ -107,6 +111,6 @@ Serve the files over HTTP (the application uses JavaScript modules).
 - `src/xlsx.js` — dependency‑free Excel writer.
 - `tests/` — verification against closed forms (Fresnel, Brewster, quarter‑wave stacks), an independent complex Abelès‑matrix code at normal and oblique incidence, finite differences, the specification's worked example and the book's designs.
 
-Release notes: [docs/RELEASE-v2.3.0.md](docs/RELEASE-v2.3.0.md), [v2.2.2](docs/RELEASE-v2.2.2.md), [v2.2.1](docs/RELEASE-v2.2.1.md), [v2.2.0](docs/RELEASE-v2.2.0.md), [v2.1.3](docs/RELEASE-v2.1.3.md), [v2.1.1](docs/RELEASE-v2.1.1.md), [v2.1.0](docs/RELEASE-v2.1.0.md), [v2.0.0](docs/RELEASE-v2.0.0.md). The source
+Release notes: [docs/RELEASE-v2.3.1.md](docs/RELEASE-v2.3.1.md), [v2.3.0](docs/RELEASE-v2.3.0.md), [v2.2.2](docs/RELEASE-v2.2.2.md), [v2.2.1](docs/RELEASE-v2.2.1.md), [v2.2.0](docs/RELEASE-v2.2.0.md), [v2.1.3](docs/RELEASE-v2.1.3.md), [v2.1.1](docs/RELEASE-v2.1.1.md), [v2.1.0](docs/RELEASE-v2.1.0.md), [v2.0.0](docs/RELEASE-v2.0.0.md). The source
 books and the private method specification are not distributed with this
 repository.

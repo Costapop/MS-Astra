@@ -642,8 +642,15 @@ export class MeritChart extends Plot {
     ctx.beginPath();
     h.forEach((p, i) => { const x = xs(i), y = ys(Math.log10(Math.max(p.F, lo))); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
+    // grid enrichment: the merit changes its definition — a vertical marker separates the two grids
     h.forEach((p, i) => {
-      if (!p.mark) return;
+      if (p.mark !== 'grid') return;
+      const x = Math.round(xs(i)) + 0.5;
+      ctx.strokeStyle = T['ink-3']; ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, fr.y0); ctx.lineTo(x, fr.y1); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = T['ink-3']; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.font = `10px ${T.font}`; ctx.fillText('grid +', x + 3, fr.y0 + 2); ctx.font = `11px ${T.font}`;
+    });
+    h.forEach((p, i) => {
+      if (!p.mark || p.mark === 'grid') return;
       const x = xs(i), y = ys(Math.log10(Math.max(p.F, lo)));
       ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
       ctx.fillStyle = p.mark === 'needle' ? T.needle : p.mark === 'growth' ? T['series-current'] : p.mark === 'cleanup' ? T['ink-3'] : T.good;

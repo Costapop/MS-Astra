@@ -72,6 +72,19 @@ Run `npm test` (Node 20+). All checks are automated in `tests/`.
   agrees with its flag, and the reported‑design sentence matches the archive
   flag; a budget‑limited exploration result is replayed exactly; the
   multi‑start winner replays to the identical reason.
+* Reported design (v2.3.1): for every preset at thin‑layer thresholds of 1
+  and 6 nm, plus 21‑point grids with transition zones and threshold 3–6 nm
+  (grid enrichment active), every design the run showed is re‑evaluated on
+  the final grid: no complete design within the limits is better than the
+  reported one; the reported design has no layer below the threshold; the
+  built‑in self‑checks pass; the needle fact never reports an admissible
+  improvement as "still possible" unless the run stopped by the target or by
+  its budget; whenever a lower value was shown during the run the *Best
+  design* sentence explains it (thin layer or coarser grid); final‑phase
+  gains are reported with their before/after merits. Before this change the
+  cube preset at threshold 6 nm reported F = 1.4·10⁻⁶ while a complete
+  design with F = 3.7·10⁻⁹ had been seen (the archive held a thin‑layer
+  design whose cleanup raised the merit); it now reports 3.7·10⁻⁹.
 
 ## Excel export (`tests/xlsx.test.js`)
 
