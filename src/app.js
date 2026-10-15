@@ -651,6 +651,14 @@ function buildVerdict(ev) {
 /* ------------------------------------------------------------------ */
 /*  Runner                                                             */
 /* ------------------------------------------------------------------ */
+/* ---- the inputs column folds into a strip so that the charts take the full width ---- */
+const COMPACT = () => typeof matchMedia === 'function' && matchMedia('(min-width: 1024px) and (max-width: 1279px)').matches;
+function setInputsHidden(hidden) {
+  document.querySelector('.layout').classList.toggle('inputs-hidden', hidden);
+  const b = $('btn-inputs'); b.textContent = hidden ? 'Show inputs' : 'Hide'; b.setAttribute('aria-expanded', String(!hidden));
+  b.title = hidden ? 'Unfold the inputs column' : 'Fold the inputs into a strip so that the charts take the full width; they unfold on Reset';
+}
+function inputsHidden() { return document.querySelector('.layout').classList.contains('inputs-hidden'); }
 function lockSidebar() { $('sidebar').classList.add('locked'); $('spectrum-tools').classList.add('locked'); for (const p of document.querySelectorAll('.settings-panel')) p.classList.add('locked'); spectrum.set({ editable: false }); }
 function unlockSidebar() { $('sidebar').classList.remove('locked'); $('spectrum-tools').classList.remove('locked'); for (const p of document.querySelectorAll('.settings-panel')) p.classList.remove('locked'); spectrum.set({ editable: true }); }
 
@@ -669,6 +677,7 @@ function startRun() {
   run.running = true; run.paused = false; run.finished = false; run.holdUntil = 0; run.cycle = 0; run.stepTo = null;
   timerStart(); selectTab('chart');
   lockSidebar();
+  if (COMPACT()) setInputsHidden(true);   // a laptop at a scaled resolution: give the charts the inputs' width during the run
   $('btn-run').textContent = 'Pause'; $('btn-step').disabled = false; $('btn-export').disabled = true;
   if (settings.startMode === 'multi') startExploration();
   else { run.gen = synthesize(run.cfg); setStageEntry('Starting…', 'running'); }
@@ -758,7 +767,7 @@ function resetRun() {
   run.gen = null; run.running = false; run.paused = false; run.finished = false; run.stepTo = null; run.exploring = false; run.exploreLabel = null;
   if (run.worker) { run.worker.terminate(); run.worker = null; }
   timerReset(); spectrum.set({ preview: false });
-  unlockSidebar();
+  unlockSidebar(); if (inputsHidden()) setInputsHidden(false);
   validate();
   setInitialDesign();
   $('btn-run').textContent = 'Start synthesis'; $('btn-run').disabled = false; $('btn-step').disabled = false;
@@ -895,6 +904,7 @@ function init() {
     if (run.gen) run.stepTo = true;
   });
   $('btn-reset').addEventListener('click', resetRun);
+  $('btn-inputs').addEventListener('click', () => setInputsHidden(!inputsHidden()));
   $('btn-export').addEventListener('click', exportExcel);
   $('btn-recipe').addEventListener('click', showRecipe);
   $('recipe-close').addEventListener('click', () => $('recipe-dialog').close());

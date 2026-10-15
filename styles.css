@@ -75,7 +75,7 @@ html, body { height: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font);
   font-size: 14px; line-height: 1.35; -webkit-font-smoothing: antialiased;
-  display: flex; flex-direction: column; min-height: 100vh;
+  display: flex; flex-direction: column; height: 100vh;
 }
 h1, h2, h3, p { margin: 0; }
 button, input, select { font: inherit; color: inherit; }
@@ -128,9 +128,20 @@ a:hover { text-decoration: underline; }
    derivative, coating structure) so that all of them stay in view while a run
    is animated; the right rail holds the state of the run (verdict, tiles),
    the merit history and the event log. The centre column and the rail share
-   one row template, so their cards line up row by row. */
-.layout { flex: 1; display: grid; grid-template-columns: 316px minmax(0, 1fr) 340px; gap: 16px; padding: 16px; min-height: 0; height: calc(100vh - 57px); }
+   one row template, so their cards line up row by row. The sidebar folds into
+   a narrow strip (Hide / Show inputs) to give the charts the full width; on
+   screens narrower than 1280 px it folds by itself when a run starts and
+   unfolds on Reset. Below 1024 px the page stacks. */
+.layout { flex: 1; display: grid; grid-template-columns: 316px minmax(0, 1fr) 340px; gap: 16px; padding: 16px; min-height: 0; }
 .sidebar { overflow: auto; padding-right: 2px; display: flex; flex-direction: column; gap: 12px; }
+.sidebar-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px 0 6px; flex: none; }
+.sidebar-bar .sidebar-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); }
+.layout.inputs-hidden { grid-template-columns: 36px minmax(0, 1fr) 340px; }
+.layout.inputs-hidden .sidebar { overflow: visible; padding: 0; }
+.layout.inputs-hidden .sidebar > :not(.sidebar-bar) { display: none; }
+.layout.inputs-hidden .sidebar-bar { padding: 0; justify-content: flex-start; }
+.layout.inputs-hidden .sidebar-title { display: none; }
+.layout.inputs-hidden #btn-inputs { writing-mode: vertical-rl; transform: rotate(180deg); padding: 14px 8px; border-radius: 12px; width: 36px; }
 .dashboard, .rail {
   display: grid; min-height: 0; gap: 14px;
   grid-template-columns: minmax(0, 1fr);
@@ -160,6 +171,7 @@ a:hover { text-decoration: underline; }
   font-variant-numeric: tabular-nums; outline: none; transition: box-shadow .15s, border-color .15s; color: var(--ink);
 }
 .tool input { width: 58px; text-align: right; }
+.tool .short { display: none; }
 .tool input:focus, .tool select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
 .sidebar.locked ~ .dashboard .tool, .card-tools.locked .tool { opacity: 0.6; pointer-events: none; }
 .swatch.pol-s { height: 0; border-top: 2px solid var(--pol-s); background: none; }
@@ -340,12 +352,54 @@ dialog.sheet header { display: flex; align-items: center; justify-content: space
 @media (max-width: 900px) { .panel { grid-template-columns: 1fr; } }
 @media (max-width: 1400px) {
   .layout { grid-template-columns: 284px minmax(0, 1fr) 308px; gap: 14px; }
+  .layout.inputs-hidden { grid-template-columns: 36px minmax(0, 1fr) 308px; }
   .row select { width: 128px; }
   #card-structure .opt { display: none; }
+  .legend { gap: 9px; }
+  .tool .long { display: none; }
+  .tool .short { display: inline; }
 }
-@media (max-width: 1180px) {
-  .layout { grid-template-columns: 1fr; height: auto; flex: none; }
+/* compact three columns: laptops at a scaled resolution (1024–1279 px). The
+   angle and the target characteristic leave the chart header (they are on
+   the Target tab); the inputs fold into the strip when a run starts. */
+@media (max-width: 1279px) {
+  .layout { grid-template-columns: 236px minmax(0, 1fr) 260px; gap: 12px; padding: 12px; }
+  .layout.inputs-hidden { grid-template-columns: 34px minmax(0, 1fr) 260px; }
+  #spectrum-tools .tool { display: none; }
+  .dashboard, .rail { gap: 12px; }
+  .brand { min-width: 0; }
+  .brand p { display: none; }
+  .topbar { gap: 14px; padding: 8px 16px; }
+  .btn { padding: 7px 13px; }
+  .segmented button { padding: 5px 10px; }
+  .group { padding: 10px 12px; }
+  .row select { width: 118px; }
+  .row input { width: 92px; }
+  .card > header { padding: 9px 12px 4px; gap: 10px; }
+  .tiles { padding: 4px 12px; gap: 8px; }
+  .result, .start-label, .progress { margin-left: 12px; margin-right: 12px; }
+  .log { padding: 0 12px 10px; }
+}
+/* short screens: tighter chrome so that three chart rows still fit */
+@media (max-height: 760px) {
+  .topbar { padding: 6px 16px; }
+  .layout { padding: 10px; gap: 10px; }
+  .dashboard, .rail { gap: 10px; }
+  .dashboard, .rail { grid-template-rows: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 0.8fr); }
+  .sidebar { gap: 8px; }
+  .group { padding: 8px 12px; }
+  .group h2, .group summary { margin-bottom: 4px; }
+  .row { padding: 5px 0; }
+  .card > header { padding: 7px 12px 2px; }
+  .plot { min-height: 60px; }
+}
+@media (max-width: 1023px) {
+  .layout, .layout.inputs-hidden { grid-template-columns: 1fr; height: auto; flex: none; }
+  body { height: auto; min-height: 100vh; }
   .sidebar { order: 3; overflow: visible; }
+  #spectrum-tools .tool { display: inline-flex; }
+  .sidebar-bar, .layout.inputs-hidden .sidebar-bar { display: none; }
+  .layout.inputs-hidden .sidebar > :not(.sidebar-bar) { display: revert; }
   .dashboard { order: 1; }
   .rail { order: 2; }
   .dashboard, .rail { grid-template-rows: none; min-height: auto; }

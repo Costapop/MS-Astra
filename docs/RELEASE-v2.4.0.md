@@ -9,9 +9,20 @@ language. The engine is unchanged.
   reflectance spectrum, needle derivative, coating structure — and the state
   of the run on the right: the Synthesis card (verdict, tiles, progress), the
   merit‑function history and the event log. The centre column and the right
-  rail share one row template, so the cards line up row by row. Below
-  1400 px the side columns narrow; below 1180 px the page stacks (charts,
-  then the run state, then the inputs).
+  rail share one row template, so the cards line up row by row. The columns
+  take the height of the window (nothing to scroll), so every chart stays in
+  view during a run.
+- **Inputs fold away.** *Hide* above the inputs folds them into a narrow
+  strip and the charts take the width; *Show inputs* brings them back, and
+  Reset unfolds them. On laptops at a scaled resolution (window narrower
+  than 1280 px) the inputs fold by themselves when a run starts, since they
+  are locked during the run anyway.
+- **Widths.** Full layout from 1400 px; narrower side columns and short
+  tool labels in the spectrum header (θ for the angle) down to 1280 px;
+  compact columns (the angle and the characteristic are then set on the
+  Target tab) down to 1024 px; the page stacks below that. On short windows
+  (under 760 px) the chrome tightens and the axis tick density follows the
+  plot height.
 - **Target bands.** The target is drawn as a translucent band 7 px tall
   centred on the required level — thicker than any curve (2.25 px), with a
   faint edge — and the computed spectra remain visible through it; the
@@ -37,4 +48,5 @@ language. The engine is unchanged.
   every mode (normal and oblique incidence, `(Rs + Rp)/2`, `Rs & Rp` with
   equal and with different targets, multi‑start exploration and replay, layer
   table, light and dark themes) at 1440 × 900, 1280 × 800 and the stacked
-  layout at 1100 px, with no console errors.
+  layout at 960 px, with no console errors; the three‑column layout checked at
+  1147 × 620, 1024 × 660, 1280 × 720, 1366 × 768 and 1920 × 1080.

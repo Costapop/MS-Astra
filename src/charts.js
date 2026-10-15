@@ -266,7 +266,7 @@ export class SpectrumChart extends Plot {
     ctx.fillRect(xs(s.lambdaMax), fr.y0, fr.x1 - xs(s.lambdaMax), fr.y1 - fr.y0);
     ctx.globalAlpha = 1;
     const xt = { ticks: niceTicks(xs.invert(fr.x0), xs.invert(fr.x1), Math.max(3, Math.floor((fr.x1 - fr.x0) / 90))), scale: xs };
-    const yt = { ticks: niceTicks(y0, y1, Math.max(3, Math.floor((fr.y1 - fr.y0) / 44))), scale: ys };
+    const yt = { ticks: niceTicks(y0, y1, Math.max(2, Math.floor((fr.y1 - fr.y0) / 44))), scale: ys };
     this.axes(ctx, fr, xt, yt, (v) => fmtNum(v), (v) => `${fmtNum(100 * v, y1 - y0 < 0.1 ? 2 : 0)} %`, 'wavelength, nm', 'reflectance R');
     // the clip leaves room for a target band sitting on 0 % or 100 %
     const over = TARGET_H / 2 + 1;
@@ -462,7 +462,7 @@ export class NeedleChart extends Plot {
     ctx.strokeStyle = T.line; ctx.lineWidth = 1; z = 0;
     for (let j = 0; j < s.layers.length - 1; j++) { z += s.layers[j].d; const x = Math.round(xs(z)) + 0.5; ctx.beginPath(); ctx.moveTo(x, fr.y0); ctx.lineTo(x, fr.y1); ctx.stroke(); }
     const xt = { ticks: niceTicks(0, s.xmax, Math.max(3, Math.floor((fr.x1 - fr.x0) / 90))), scale: xs };
-    const yt = { ticks: niceTicks(-ymax, ymax, 5), scale: ys };
+    const yt = { ticks: niceTicks(-ymax, ymax, Math.max(3, Math.min(5, Math.floor((fr.y1 - fr.y0) / 30)))), scale: ys };
     this.axes(ctx, fr, xt, yt, (v) => fmtNum(v), (v) => fmtNum(v, 1), 'position from substrate z, nm', `g(z), 10${sup(exp)} nm⁻¹`);
     // zero line
     ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 1; const yz = Math.round(ys(0)) + 0.5; ctx.beginPath(); ctx.moveTo(fr.x0, yz); ctx.lineTo(fr.x1, yz); ctx.stroke();
@@ -578,7 +578,7 @@ export class StructureChart extends Plot {
     const ctx = this.begin(), T = theme(), s = this.state;
     const { xs, ys, fr } = this.scales();
     const xt = { ticks: niceTicks(0, s.xmax, Math.max(3, Math.floor((fr.x1 - fr.x0) / 90))), scale: xs };
-    const yt = { ticks: niceTicks(1, s.nmax + 0.25, 4), scale: ys };
+    const yt = { ticks: niceTicks(1, s.nmax + 0.25, Math.max(2, Math.min(4, Math.floor((fr.y1 - fr.y0) / 28)))), scale: ys };
     this.axes(ctx, fr, xt, yt, (v) => fmtNum(v), (v) => fmtNum(v, 1), 'position from substrate z, nm', 'refractive index n');
     // substrate block (left of z = 0) and ambient hint
     ctx.fillStyle = T.substrate; ctx.globalAlpha = 0.6;

@@ -11,8 +11,9 @@ single engineering dashboard: everything the user enters on the left, the
 three charts of the synthesis (reflectance spectrum, needle derivative,
 coating structure) stacked in the centre so that all of them stay in view
 while a run is animated, and the state of the run (verdict, tiles, merit
-history, event log) on the right — and it runs entirely in the browser with
-no dependencies, accounts or backend.
+history, event log) on the right; the inputs fold into a strip (*Hide* /
+*Show inputs*) when the charts need the width — and it runs entirely in the
+browser with no dependencies, accounts or backend.
 
 ## Method in one paragraph
 

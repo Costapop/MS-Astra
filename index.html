@@ -37,6 +37,10 @@
 
 <main class="layout">
   <aside class="sidebar" id="sidebar">
+    <div class="sidebar-bar">
+      <span class="sidebar-title">Inputs</span>
+      <button type="button" class="btn small" id="btn-inputs" aria-expanded="true" aria-controls="sidebar" title="Fold the inputs into a strip so that the charts take the full width; they unfold on Reset">Hide</button>
+    </div>
     <section class="group">
       <h2>Materials</h2>
       <div class="rows">
@@ -111,8 +115,8 @@
           <span class="legend-item" id="legend-ghost" hidden title="Multi‑start: the start being explored is the lighter blue line without fill, finished starts are thin grey lines, the leader green; hover the list to highlight a start in orange (Rp always dashed)"><i class="swatch ghost"></i>Starts</span>
         </div>
         <div class="card-tools" id="spectrum-tools">
-          <label class="tool" title="Angle of incidence in the incident medium, 0–89.9°"><span>Angle</span><input type="number" id="angle" min="0" max="89.9" step="0.1" inputmode="decimal"><span>°</span></label>
-          <label class="tool" title="Target characteristic: the reflectance the target bands apply to"><span>Target</span><select id="pol"></select></label>
+          <label class="tool" title="Angle of incidence in the incident medium, 0–89.9°"><span class="long">Angle</span><span class="short" aria-hidden="true">θ</span><input type="number" id="angle" min="0" max="89.9" step="0.1" inputmode="decimal"><span>°</span></label>
+          <label class="tool" title="Target characteristic: the reflectance the target bands apply to"><span class="long">Target</span><select id="pol"></select></label>
           <div class="segmented small" id="yscale"><button type="button" data-y="full" class="active">0–100 %</button><button type="button" data-y="fit">Fit</button></div>
         </div>
       </header>
