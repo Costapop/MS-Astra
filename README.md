@@ -7,8 +7,13 @@ energy reflectance `R(λ)` on a chosen spectral range and shows the whole
 process live: thickness refinement, needle insertion, deliberate thickness
 growth (gradual evolution), thin‑layer cleanup and final optimization. It is
 built for demonstrations — the charts are large, animated and arranged as a
-single engineering dashboard — and it runs entirely in the browser with no
-dependencies, accounts or backend.
+single engineering dashboard: everything the user enters on the left, the
+three charts of the synthesis (reflectance spectrum, needle derivative,
+coating structure) stacked in the centre so that all of them stay in view
+while a run is animated, and the state of the run (verdict, tiles, merit
+history, event log) on the right; the inputs fold into a strip (*Hide* /
+*Show inputs*) when the charts need the width — and it runs entirely in the
+browser with no dependencies, accounts or backend.
 
 ## Method in one paragraph
 
@@ -36,19 +41,23 @@ evidence: [docs/VERIFICATION.md](docs/VERIFICATION.md).
 ## Using the dashboard
 
 1. Pick a **target preset** on the *Presets* tab of the Reflectance spectrum
-   card, or draw your own target on the chart: drag a level up or down, drag
-   a boundary (or a range end) left or right, double‑click a band to split
-   it, double‑click a boundary to merge. The *Target* tab holds the same
+   card, or draw your own target on the chart, where it is shown as a
+   translucent band at the required level (the computed spectra stay visible
+   through it): drag a level up or down, drag a boundary (or a range end)
+   left or right, double‑click a band to split it, double‑click a boundary
+   to merge. The *Target* tab holds the same
    values numerically together with the spectral range, the number of points
    and the transition zone around target jumps (points inside it get zero
    weight). The **angle of incidence** (0–89.9°) and the **target
    characteristic** — `Rs`, `Rp`, `Rs & Rp` (a separate target for each
-   polarization: the Rp target is the dashed line on the chart and the
-   second table on the tab) or `(Rs + Rp)/2` (unpolarized light) — are set
-   in the header of the same card and on its *Target* tab; the target bands
-   are drawn and typed the same way at any angle. At an oblique angle the
-   chart adds thin lines for `Rs` (solid) and `Rp` (dashed) and the tooltip
-   shows both.
+   polarization: the Rs target is the blue‑green band, the Rp target the
+   magenta band with a dashed edge and the second table on the tab) or
+   `(Rs + Rp)/2` (unpolarized light) — are set in the header of the same
+   card and on its *Target* tab; the target bands are drawn and typed the
+   same way at any angle. At an oblique angle the chart adds thin lines for
+   `Rs` (solid blue‑green) and `Rp` (dashed magenta) under the optimized
+   characteristic (blue) and the tooltip shows both; in the `Rs & Rp` mode
+   both polarizations are full curves in those colours.
 2. In the sidebar set the H and L materials, the substrate, the **incident
    medium** the light comes from (air or BK7 — e.g. a cemented cube, with the
    angle measured inside it), the starting
@@ -73,9 +82,11 @@ evidence: [docs/VERIFICATION.md](docs/VERIFICATION.md).
    enrichment) — then the
    tiles and the event log (folded to the last five events; every needle
    step lists the refined alternatives), check the final needle‑derivative
-   verdict on its chart, hover the starts list to compare the explored
-   starting designs on the spectrum, open the **Layer table** or the
-   **Starts** ranking, and **Export Excel** to download the target and
+   verdict on its chart, hover the starts list in the **Multi‑start** card
+   to compare the explored starting designs on the spectrum, the structure
+   and the merit history (one history per start), open the **Layer table**
+   (Coating structure card) or the **Ranking** of the starts, and **Export
+   Excel** to download the target and
    synthesized spectra, the coating parameters, the dense‑grid verification,
    the termination summary and the multi‑start ranking.
 

@@ -7,7 +7,7 @@
 
 const themeCache = { dirty: true, values: {} };
 const THEME_KEYS = ['--ink', '--ink-2', '--ink-3', '--grid', '--line', '--card', '--accent', '--series-current', '--series-current-fill',
-  '--series-target', '--mat-h', '--mat-h-fill', '--mat-l', '--mat-l-fill', '--needle', '--needle-fill', '--substrate', '--good', '--bad', '--control'];
+  '--series-target', '--pol-s', '--pol-p', '--mat-h', '--mat-h-fill', '--mat-l', '--mat-l-fill', '--needle', '--needle-fill', '--substrate', '--good', '--bad', '--control'];
 export function theme() {
   if (themeCache.dirty) {
     const cs = getComputedStyle(document.documentElement);
@@ -75,6 +75,14 @@ class Plot {
   destroy() { this.ro.disconnect(); }
 }
 const SUB_W = 44; // width of the substrate block left of z = 0 in the z-charts
+/* Spectrum chart line system.
+   Target: a translucent band TARGET_H px tall centred on the required level — thicker than any curve, the computed
+   spectra stay visible through it. Curves: the optimized characteristic («current») is CURVE_W px solid blue with an area
+   fill; the s‑polarization is blue‑green and solid, the p‑polarization magenta and dashed (hue and dash both carry the
+   distinction). In the «Rs & Rp» mode the two polarizations are both full curves and their target bands take the same
+   tints, the Rp band with a dashed edge. Multi‑start previews and ghosts never use the Rp dash: the start being explored
+   is the lighter blue curve without fill, finished starts are thin grey, the leader green, the hovered one orange. */
+const TARGET_H = 7, CURVE_W = 2.25, POL_W = 1.5, DASH_P = [6, 4];
 const lin = (d0, d1, r0, r1) => { const k = (r1 - r0) / ((d1 - d0) || 1); const f = (v) => r0 + (v - d0) * k; f.invert = (p) => d0 + (p - r0) / k; return f; };
 
 /* ===================================================================== */
@@ -85,7 +93,8 @@ export class SpectrumChart extends Plot {
     super(canvas, { l: 66, r: 18, t: 26, b: 34 });
     this.tooltip = tooltip;
     // bands: the target (Rs target in the «Rs & Rp» mode); bands2: the Rp target when `dual`
-    this.state = { lambdaMin: 400, lambdaMax: 700, bands: [], bands2: null, dual: false, grid: null, target: null, R: null, weights: null, added: null, curve: null, curveDashed: false, transition: 0, yMode: 'full', editable: true, ghosts: [], ghostHighlight: null, showPols: false, showRs: true, showRp: true, charLabel: 'R' };
+    // preview: the curve belongs to a start being explored in the background (multi‑start) — drawn lighter, without fill
+    this.state = { lambdaMin: 400, lambdaMax: 700, bands: [], bands2: null, dual: false, grid: null, target: null, R: null, weights: null, added: null, curve: null, preview: false, transition: 0, yMode: 'full', editable: true, ghosts: [], ghostHighlight: null, showPols: false, showRs: true, showRp: true, charLabel: 'R' };
     this.onChange = null;      // (patch) => void
     this.hover = null; this.drag = null;
     const c = canvas;
@@ -257,9 +266,11 @@ export class SpectrumChart extends Plot {
     ctx.fillRect(xs(s.lambdaMax), fr.y0, fr.x1 - xs(s.lambdaMax), fr.y1 - fr.y0);
     ctx.globalAlpha = 1;
     const xt = { ticks: niceTicks(xs.invert(fr.x0), xs.invert(fr.x1), Math.max(3, Math.floor((fr.x1 - fr.x0) / 90))), scale: xs };
-    const yt = { ticks: niceTicks(y0, y1, Math.max(3, Math.floor((fr.y1 - fr.y0) / 44))), scale: ys };
+    const yt = { ticks: niceTicks(y0, y1, Math.max(2, Math.floor((fr.y1 - fr.y0) / 44))), scale: ys };
     this.axes(ctx, fr, xt, yt, (v) => fmtNum(v), (v) => `${fmtNum(100 * v, y1 - y0 < 0.1 ? 2 : 0)} %`, 'wavelength, nm', 'reflectance R');
-    ctx.save(); ctx.beginPath(); ctx.rect(fr.x0, fr.y0 - 1, fr.x1 - fr.x0, fr.y1 - fr.y0 + 2); ctx.clip();
+    // the clip leaves room for a target band sitting on 0 % or 100 %
+    const over = TARGET_H / 2 + 1;
+    ctx.save(); ctx.beginPath(); ctx.rect(fr.x0, fr.y0 - over, fr.x1 - fr.x0, fr.y1 - fr.y0 + 2 * over); ctx.clip();
     // transition zones around target jumps (zero weight) of every target
     if (s.transition > 0) {
       ctx.save(); ctx.strokeStyle = T['ink-3']; ctx.globalAlpha = 0.35; ctx.lineWidth = 1;
@@ -271,21 +282,22 @@ export class SpectrumChart extends Plot {
       }
       ctx.restore();
     }
-    // ghost spectra of explored starting designs (R; in the dual mode R = Rs and R2 = Rp dashed)
+    const polyline = (wl, arr) => { ctx.beginPath(); for (let k = 0; k < wl.length; k++) { const x = xs(wl[k]), y = ys(arr[k]); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } };
+    // ghost spectra of explored starting designs (R; in the dual mode R = Rs solid and R2 = Rp dashed)
     if (s.ghosts && s.ghosts.length) {
       const order = s.ghosts.map((g, i) => i).sort((a, b) => (s.ghosts[a].best ? 1 : 0) - (s.ghosts[b].best ? 1 : 0) || (a === s.ghostHighlight ? 1 : 0) - (b === s.ghostHighlight ? 1 : 0));
+      ctx.lineJoin = 'round';
       for (const i of order) {
         const gh = s.ghosts[i]; if (!gh.R) continue;
         const hl = i === s.ghostHighlight;
-        for (const [arr, dash] of [[gh.R, [7, 5]], [gh.R2, [2, 4]]]) {
+        for (const [arr, dash] of [[gh.R, []], [gh.R2, DASH_P]]) {
           if (!arr) continue;
-          ctx.beginPath();
-          for (let k = 0; k < gh.wl.length; k++) { const x = xs(gh.wl[k]), y = ys(arr[k]); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
-          // multi-start lines share the line width of the synthesis curve (2.25 px); only colour and dash differ
-          if (hl) { ctx.strokeStyle = T.needle; ctx.lineWidth = 2.5; ctx.globalAlpha = 1; ctx.setLineDash(arr === gh.R2 ? [2, 4] : []); }
-          else if (gh.best) { ctx.strokeStyle = T.good; ctx.lineWidth = 2.25; ctx.globalAlpha = 0.9; ctx.setLineDash(dash); }
-          else { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 2.25; ctx.globalAlpha = 0.4; ctx.setLineDash(dash); }
-          ctx.stroke(); ctx.globalAlpha = 1; ctx.setLineDash([]);
+          polyline(gh.wl, arr);
+          // finished starts are thinner than the synthesis curve and grey; the leader green; the hovered start orange and full weight
+          if (hl) { ctx.strokeStyle = T.needle; ctx.lineWidth = 2.5; ctx.globalAlpha = 1; }
+          else if (gh.best) { ctx.strokeStyle = T.good; ctx.lineWidth = 1.75; ctx.globalAlpha = 0.9; }
+          else { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 1.25; ctx.globalAlpha = 0.45; }
+          ctx.setLineDash(dash); ctx.stroke(); ctx.globalAlpha = 1; ctx.setLineDash([]);
         }
       }
       const hl = s.ghostHighlight != null ? s.ghosts[s.ghostHighlight] : null;
@@ -297,48 +309,47 @@ export class SpectrumChart extends Plot {
         ctx.fillText(`${hl.name} · F = ${fmt.sci(hl.F)} · ${hl.layers} layers`, fr.x0 + 8, top ? fr.y0 + 4 : fr.y1 - 4); ctx.font = `11px ${T.font}`;
       }
     }
+    // the area under a curve down to the bottom of the frame
+    const area = (wl, arr, fill) => { polyline(wl, arr); ctx.lineTo(xs(wl[wl.length - 1]), ys(y0)); ctx.lineTo(xs(wl[0]), ys(y0)); ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); };
+    const previewAlpha = s.preview ? 0.6 : 1;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'butt';
     if (s.dual && s.curve && s.curve.Rs && s.curve.Rp) {
-      // «Rs & Rp»: both polarizations are full curves — Rs solid with area, Rp dashed
-      for (const [arr, dash, area] of [[s.curve.Rs, [], true], [s.curve.Rp, [7, 5], false]]) {
-        ctx.beginPath();
-        for (let i = 0; i < s.curve.wl.length; i++) { const x = xs(s.curve.wl[i]), y = ys(arr[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
-        ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2.25; ctx.lineJoin = 'round';
-        ctx.setLineDash(s.curveDashed ? [7, 5] : dash); ctx.stroke(); ctx.setLineDash([]);
-        if (area && !s.curveDashed) {
-          ctx.lineTo(xs(s.curve.wl[s.curve.wl.length - 1]), ys(y0)); ctx.lineTo(xs(s.curve.wl[0]), ys(y0)); ctx.closePath();
-          ctx.fillStyle = T['series-current-fill']; ctx.fill();
-        }
+      // «Rs & Rp»: both polarizations are full curves of equal weight — Rs solid blue‑green, Rp dashed magenta, no fill
+      for (const [arr, dash, color] of [[s.curve.Rs, [], T['pol-s']], [s.curve.Rp, DASH_P, T['pol-p']]]) {
+        polyline(s.curve.wl, arr);
+        ctx.strokeStyle = color; ctx.lineWidth = CURVE_W; ctx.globalAlpha = previewAlpha; ctx.setLineDash(dash); ctx.stroke();
       }
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
     } else {
-      // s and p polarizations at oblique incidence: thin solid (s) and dashed (p) lines under the characteristic
-      if (s.showPols && s.curve && s.curve.Rs && s.curve.Rp && !s.curveDashed) {
-        for (const [arr, dash, on] of [[s.curve.Rs, [], s.showRs], [s.curve.Rp, [5, 4], s.showRp]]) {
+      // s and p polarizations at oblique incidence: thin lines in their own hues beneath the characteristic (not in previews)
+      if (s.showPols && s.curve && s.curve.Rs && s.curve.Rp && !s.preview) {
+        for (const [arr, dash, color, on] of [[s.curve.Rs, [], T['pol-s'], s.showRs], [s.curve.Rp, DASH_P, T['pol-p'], s.showRp]]) {
           if (!on) continue;
-          ctx.beginPath();
-          for (let i = 0; i < s.curve.wl.length; i++) { const x = xs(s.curve.wl[i]), y = ys(arr[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
-          ctx.strokeStyle = T['series-current']; ctx.lineWidth = 1.25; ctx.globalAlpha = 0.7; ctx.setLineDash(dash); ctx.stroke();
+          polyline(s.curve.wl, arr);
+          ctx.strokeStyle = color; ctx.lineWidth = POL_W; ctx.globalAlpha = 0.85; ctx.setLineDash(dash); ctx.stroke();
         }
         ctx.setLineDash([]); ctx.globalAlpha = 1;
       }
       // current R: dense display curve (or grid values) as area + line
       const cw = s.curve ? s.curve.wl : s.grid, cR = s.curve ? s.curve.R : s.R;
       if (cw && cR) {
-        ctx.beginPath();
-        for (let i = 0; i < cw.length; i++) { const x = xs(cw[i]), y = ys(cR[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
-        ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2.25; ctx.lineJoin = 'round';
-        if (s.curveDashed) { ctx.setLineDash([7, 5]); ctx.stroke(); ctx.setLineDash([]); }
-        else {
-          ctx.stroke();
-          ctx.lineTo(xs(cw[cw.length - 1]), ys(y0)); ctx.lineTo(xs(cw[0]), ys(y0)); ctx.closePath();
-          ctx.fillStyle = T['series-current-fill']; ctx.fill();
-        }
+        if (!s.preview) area(cw, cR, T['series-current-fill']);
+        polyline(cw, cR);
+        ctx.strokeStyle = T['series-current']; ctx.lineWidth = CURVE_W; ctx.globalAlpha = previewAlpha; ctx.stroke(); ctx.globalAlpha = 1;
       }
     }
-    // targets: thick step lines — the Rp target (set 1) dashed
+    // targets: translucent bands centred on the required level — the computed spectra remain visible through them;
+    // in the «Rs & Rp» mode the Rs band is tinted blue‑green and the Rp band (set 1) magenta with a dashed edge
     sets.forEach((bands, set) => {
-      ctx.strokeStyle = T['series-target']; ctx.lineWidth = 3; ctx.lineCap = set ? 'butt' : 'round';
-      ctx.setLineDash(set ? [9, 6] : []);
-      for (const b of bands) { ctx.beginPath(); ctx.moveTo(xs(b.from), ys(b.R)); ctx.lineTo(xs(b.to), ys(b.R)); ctx.stroke(); }
+      const color = s.dual ? (set ? T['pol-p'] : T['pol-s']) : T['series-target'];
+      const half = TARGET_H / 2;
+      for (const b of bands) {
+        const x0 = xs(b.from), x1 = xs(b.to), yc = ys(b.R);
+        ctx.fillStyle = color; ctx.globalAlpha = s.dual ? 0.26 : 0.22; ctx.fillRect(x0, yc - half, x1 - x0, TARGET_H);
+        ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.globalAlpha = set ? 0.8 : 0.5; ctx.setLineDash(set ? [4, 3] : []);
+        ctx.strokeRect(Math.round(x0) + 0.5, Math.round(yc - half) + 0.5, Math.max(1, Math.round(x1 - x0) - 1), TARGET_H - 1);
+      }
+      ctx.globalAlpha = 1; ctx.setLineDash([]);
       ctx.lineWidth = 1; ctx.setLineDash([3, 4]); ctx.strokeStyle = T['ink-3'];
       for (let i = 0; i < bands.length - 1; i++) { const x = Math.round(xs(bands[i].to)) + 0.5; ctx.beginPath(); ctx.moveTo(x, fr.y0); ctx.lineTo(x, fr.y1); ctx.stroke(); }
       ctx.setLineDash([]);
@@ -364,9 +375,9 @@ export class SpectrumChart extends Plot {
     if (this.hover && !this.drag && s.grid && this.hoverIndex != null && !this.tooltip.hidden) {
       const i = this.hoverIndex, x = Math.round(xs(s.grid[i])) + 0.5;
       ctx.strokeStyle = T['ink-3']; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(x, fr.y0); ctx.lineTo(x, fr.y1); ctx.stroke(); ctx.setLineDash([]);
-      const dot = (yv) => { ctx.fillStyle = T['series-current']; ctx.beginPath(); ctx.arc(xs(s.grid[i]), ys(yv), 4, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = T.card; ctx.lineWidth = 2; ctx.stroke(); };
-      if (s.dual && s.curve && s.curve.Rs) { let ci = 0, cd = Infinity; for (let k = 0; k < s.curve.wl.length; k++) { const d = Math.abs(s.curve.wl[k] - s.grid[i]); if (d < cd) { cd = d; ci = k; } } dot(s.curve.Rs[ci]); dot(s.curve.Rp[ci]); }
-      else if (s.R) dot(s.R[i]);
+      const dot = (yv, color) => { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(xs(s.grid[i]), ys(yv), 4, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = T.card; ctx.lineWidth = 2; ctx.stroke(); };
+      if (s.dual && s.curve && s.curve.Rs) { let ci = 0, cd = Infinity; for (let k = 0; k < s.curve.wl.length; k++) { const d = Math.abs(s.curve.wl[k] - s.grid[i]); if (d < cd) { cd = d; ci = k; } } dot(s.curve.Rs[ci], T['pol-s']); dot(s.curve.Rp[ci], T['pol-p']); }
+      else if (s.R) dot(s.R[i], T['series-current']);
     }
     ctx.restore();
     // handles
@@ -375,9 +386,11 @@ export class SpectrumChart extends Plot {
       for (const h of this.handles()) {
         const active = (drag && drag.type === h.type && drag.index === h.index && drag.set === h.set) || (!drag && hov && hov.type === h.type && hov.index === h.index && hov.set === h.set);
         const r = active ? 7 : 5.5;
+        // level handles carry the colour of their target band (neutral; blue‑green Rs / dashed magenta Rp in the dual mode)
+        const levelColor = s.dual ? (h.set ? T['pol-p'] : T['pol-s']) : T['series-target'];
         ctx.beginPath(); ctx.arc(h.x, h.y, r, 0, Math.PI * 2);
         ctx.fillStyle = h.type === 'level' ? T.card : T.accent; ctx.fill();
-        ctx.lineWidth = 2; ctx.strokeStyle = h.type === 'level' ? T['series-target'] : T.card;
+        ctx.lineWidth = 2; ctx.strokeStyle = h.type === 'level' ? levelColor : T.card;
         if (h.set) ctx.setLineDash([3, 2.5]);
         ctx.stroke(); ctx.setLineDash([]);
         if (h.type !== 'level') {
@@ -401,7 +414,9 @@ export class SpectrumChart extends Plot {
 /* ===================================================================== */
 export class NeedleChart extends Plot {
   constructor(canvas, tooltip) {
-    super(canvas, { l: 66, r: 18, t: 16, b: 34 });
+    // the top margin holds a text strip (the candidate label during the run, the verdict banner at the end), so that
+    // neither covers the curve
+    super(canvas, { l: 66, r: 18, t: 34, b: 34 });
     this.tooltip = tooltip;
     this.state = { xmax: 1, layers: [], scan: null, candidate: null, insertion: null, stale: false, Hkey: 'H', Lkey: 'L', annotations: null, banner: null };
     canvas.addEventListener('pointermove', (e) => this.onMove(e));
@@ -428,7 +443,13 @@ export class NeedleChart extends Plot {
     let i = 0, bd = Infinity;
     for (let k = 0; k < s.scan.z.length; k++) { const d = Math.abs(s.scan.z[k] - z); if (d < bd) { bd = d; i = k; } }
     const j = s.scan.layer[i]; const lay = s.layers[j];
-    this.tooltip.innerHTML = `<b>z = ${s.scan.z[i].toFixed(1)} nm</b><br>Layer ${j + 1} (${lay ? lay.m : '—'})<br>g = ${(s.scan.g[i] / unit).toFixed(3)} ×10${sup(Math.log10(unit))} nm⁻¹`;
+    let tested = '';
+    if (s.annotations && s.annotations.length) {
+      let best = null, bd = 10;
+      for (const a of s.annotations) { const d = Math.abs(xs(a.z) - px); if (d < bd) { bd = d; best = a; } }
+      if (best) tested = `<br>Tested insertion at z = ${best.z.toFixed(1)} nm: ${best.label}`;
+    }
+    this.tooltip.innerHTML = `<b>z = ${s.scan.z[i].toFixed(1)} nm</b><br>Layer ${j + 1} (${lay ? lay.m : '—'})<br>g = ${(s.scan.g[i] / unit).toFixed(3)} ×10${sup(Math.log10(unit))} nm⁻¹${tested}`;
     this.tooltip.hidden = false;
     const tw = this.tooltip.offsetWidth; let x = px + 14; if (x + tw > this.w - 4) x = px - tw - 14;
     this.tooltip.style.left = `${x}px`; this.tooltip.style.top = `${Math.max(4, py - 54)}px`;
@@ -449,7 +470,7 @@ export class NeedleChart extends Plot {
     ctx.strokeStyle = T.line; ctx.lineWidth = 1; z = 0;
     for (let j = 0; j < s.layers.length - 1; j++) { z += s.layers[j].d; const x = Math.round(xs(z)) + 0.5; ctx.beginPath(); ctx.moveTo(x, fr.y0); ctx.lineTo(x, fr.y1); ctx.stroke(); }
     const xt = { ticks: niceTicks(0, s.xmax, Math.max(3, Math.floor((fr.x1 - fr.x0) / 90))), scale: xs };
-    const yt = { ticks: niceTicks(-ymax, ymax, 5), scale: ys };
+    const yt = { ticks: niceTicks(-ymax, ymax, Math.max(3, Math.min(5, Math.floor((fr.y1 - fr.y0) / 30)))), scale: ys };
     this.axes(ctx, fr, xt, yt, (v) => fmtNum(v), (v) => fmtNum(v, 1), 'position from substrate z, nm', `g(z), 10${sup(exp)} nm⁻¹`);
     // zero line
     ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 1; const yz = Math.round(ys(0)) + 0.5; ctx.beginPath(); ctx.moveTo(fr.x0, yz); ctx.lineTo(fr.x1, yz); ctx.stroke();
@@ -458,7 +479,7 @@ export class NeedleChart extends Plot {
       ctx.fillText('The needle derivative appears after the first refinement.', (fr.x0 + fr.x1) / 2, (fr.y0 + fr.y1) / 2);
       return;
     }
-    ctx.save(); ctx.beginPath(); ctx.rect(fr.x0, fr.y0, fr.x1 - fr.x0, fr.y1 - fr.y0); ctx.clip();
+    ctx.save(); ctx.beginPath(); ctx.rect(fr.x0, 0, fr.x1 - fr.x0, fr.y1); ctx.clip();   // the clip includes the text strip above the plot
     ctx.globalAlpha = s.stale ? 0.45 : 1;
     // negative fill + curve coloured by inserted material
     const sc = s.scan;
@@ -486,25 +507,19 @@ export class NeedleChart extends Plot {
       ctx.fillStyle = T['needle-fill']; ctx.fillRect(x0, fr.y0, Math.max(2, x1 - x0), fr.y1 - fr.y0);
       ctx.strokeStyle = T.needle; ctx.lineWidth = 1; ctx.strokeRect(Math.round(x0) + 0.5, fr.y0 + 0.5, Math.max(2, x1 - x0), fr.y1 - fr.y0 - 1);
     }
-    // final-state annotations: tested insertions with their refined ΔF
+    // final-state annotations: the tested insertions as rings (green: a refined gain, red: none) — no text in the
+    // plot area; the refined ΔF of a ring is in the tooltip, the verdict in the strip above, the table in the log
     if (s.annotations && s.annotations.length) {
-      s.annotations.forEach((a, ai) => {
+      for (const a of s.annotations) {
         const x = xs(a.z), y = ys(a.g / unit);
-        const below = ai % 2 === 1;
-        ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fillStyle = T.card; ctx.fill();
+        ctx.beginPath(); ctx.arc(x, y, 5.5, 0, Math.PI * 2); ctx.fillStyle = T.card; ctx.fill();
         ctx.strokeStyle = a.gain ? T.good : T.bad; ctx.lineWidth = 2; ctx.stroke();
-        ctx.fillStyle = T.ink; ctx.font = `600 10px ${T.font}`; ctx.textBaseline = below ? 'top' : 'bottom';
-        const tw = ctx.measureText(a.label).width; let lx = x; ctx.textAlign = 'center';
-        if (lx - tw / 2 < fr.x0 + SUB_W) { lx = fr.x0 + SUB_W + tw / 2 + 2; } if (lx + tw / 2 > fr.x1) { lx = fr.x1 - tw / 2 - 2; }
-        ctx.fillText(a.label, lx, below ? y + 9 : y - 9);
-        ctx.font = `11px ${T.font}`;
-      });
+      }
     }
     if (s.banner) {
       ctx.font = `600 11px ${T.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
       const tw = ctx.measureText(s.banner).width;
-      let allPos = true; if (s.scan) for (let i = 0; i < s.scan.g.length; i++) if (s.scan.g[i] < 0) { allPos = false; break; }
-      const bx = fr.x0 + SUB_W + 6, bh = 20, by = allPos ? fr.y1 - bh - 4 : fr.y0 + 4, bw = Math.min(tw + 16, fr.x1 - bx - 4);
+      const bx = fr.x0 + 2, bh = 20, by = fr.y0 - bh - 7, bw = Math.min(tw + 16, fr.x1 - bx - 2);   // in the strip above the plot
       ctx.fillStyle = s.bannerKind === 'possible' ? T.needle : T.good; ctx.globalAlpha = 0.14; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 10); ctx.fill(); ctx.globalAlpha = 1;
       ctx.fillStyle = s.bannerKind === 'possible' ? T.needle : T.good;
       ctx.save(); ctx.beginPath(); ctx.rect(bx, by, bw, bh); ctx.clip(); ctx.fillText(s.banner, bx + 8, by + bh / 2); ctx.restore();
@@ -517,12 +532,13 @@ export class NeedleChart extends Plot {
       ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, fr.y0); ctx.lineTo(Math.round(x) + 0.5, fr.y1); ctx.stroke(); ctx.setLineDash([]);
       const pr = 6 + 3 * (c.pulse ?? 0);
       ctx.beginPath(); ctx.arc(x, y, pr, 0, Math.PI * 2); ctx.fillStyle = T.needle; ctx.fill(); ctx.strokeStyle = T.card; ctx.lineWidth = 2; ctx.stroke();
-      ctx.fillStyle = T.ink; ctx.font = `600 11px ${T.font}`; ctx.textBaseline = 'top';
+      // the label sits in the strip above the plot, next to the candidate's vertical line
+      ctx.fillStyle = T.ink; ctx.font = `600 11px ${T.font}`; ctx.textBaseline = 'middle';
       const label = c.label || '';
       const tw = ctx.measureText(label).width;
-      let lx = x + 10; ctx.textAlign = 'left';
-      if (lx + tw > fr.x1) { lx = x - 10; ctx.textAlign = 'right'; }
-      ctx.fillText(label, lx, fr.y0 + 4);
+      let lx = x + 8; ctx.textAlign = 'left';
+      if (lx + tw > fr.x1) { lx = Math.max(fr.x0 + tw + 2, x - 8); ctx.textAlign = 'right'; }
+      ctx.fillText(label, lx, fr.y0 - 17);
       ctx.font = `11px ${T.font}`;
     }
     ctx.restore();
@@ -534,7 +550,7 @@ export class NeedleChart extends Plot {
 /* ===================================================================== */
 export class StructureChart extends Plot {
   constructor(canvas, tooltip) {
-    super(canvas, { l: 66, r: 18, t: 16, b: 34 });
+    super(canvas, { l: 66, r: 18, t: 18, b: 34 });   // the top margin holds the layer count and the total thickness
     this.tooltip = tooltip;
     this.state = { xmax: 1, layers: [], nmax: 2.5, highlight: null, substrate: 'BK7', ns: 1.52, ambient: 'air', na: 1 };
     canvas.addEventListener('pointermove', (e) => this.onMove(e));
@@ -565,7 +581,7 @@ export class StructureChart extends Plot {
     const ctx = this.begin(), T = theme(), s = this.state;
     const { xs, ys, fr } = this.scales();
     const xt = { ticks: niceTicks(0, s.xmax, Math.max(3, Math.floor((fr.x1 - fr.x0) / 90))), scale: xs };
-    const yt = { ticks: niceTicks(1, s.nmax + 0.25, 4), scale: ys };
+    const yt = { ticks: niceTicks(1, s.nmax + 0.25, Math.max(2, Math.min(4, Math.floor((fr.y1 - fr.y0) / 28)))), scale: ys };
     this.axes(ctx, fr, xt, yt, (v) => fmtNum(v), (v) => fmtNum(v, 1), 'position from substrate z, nm', 'refractive index n');
     // substrate block (left of z = 0) and ambient hint
     ctx.fillStyle = T.substrate; ctx.globalAlpha = 0.6;
@@ -605,8 +621,9 @@ export class StructureChart extends Plot {
     }
     ctx.fillStyle = T['ink-3']; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     if (xs(z) + 36 < fr.x1) ctx.fillText(s.ambient || 'air', xs(z) + 8, (fr.y0 + fr.y1) / 2);
-    ctx.fillStyle = T['ink-3']; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
-    ctx.fillText(`${s.layers.length} layer${s.layers.length === 1 ? '' : 's'} · ${fmtNum(z, 0)} nm`, fr.x1, fr.y0 + 2);
+    // layer count and total thickness in the strip above the bars (never over a bar or its label)
+    ctx.fillStyle = T['ink-3']; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+    ctx.fillText(`${s.layers.length} layer${s.layers.length === 1 ? '' : 's'} · ${fmtNum(z, 0)} nm`, fr.x1, fr.y0 - 3);
   }
 }
 
@@ -616,20 +633,26 @@ export class StructureChart extends Plot {
 export class MeritChart extends Plot {
   constructor(canvas) {
     super(canvas, { l: 60, r: 14, t: 14, b: 30 });
-    this.state = { history: [], targetF: 1e-4 };
+    // history: the synthesis shown on the dashboard (a single start, or the replay of the multi‑start winner);
+    // starts: multi‑start — one history per starting design, indexed like the starts list
+    // ({ history, name, running, best, done }); highlight: the index of the start hovered in the list
+    this.state = { history: [], targetF: 1e-4, starts: null, highlight: null };
   }
   set(patch) { Object.assign(this.state, patch); this.requestDraw(); }
   draw() {
     const ctx = this.begin(), T = theme(), s = this.state, fr = this.frame();
     const h = s.history;
-    const n = Math.max(2, h.length);
+    const starts = (s.starts || []).filter((st) => st && st.history && st.history.length);
+    let n = Math.max(2, h.length);
+    for (const st of starts) n = Math.max(n, st.history.length);
     const xs = lin(0, n - 1, fr.x0, fr.x1);
     let lo = s.targetF, hi = s.targetF * 10;
-    for (const p of h) { if (p.F > 0) { lo = Math.min(lo, p.F); hi = Math.max(hi, p.F); } }
+    const scan = (arr) => { for (const p of arr) if (p.F > 0) { lo = Math.min(lo, p.F); hi = Math.max(hi, p.F); } };
+    scan(h); for (const st of starts) scan(st.history);
     lo = Math.pow(10, Math.floor(Math.log10(lo)) - 0.2); hi = Math.pow(10, Math.ceil(Math.log10(hi)) + 0.1);
     const ys = lin(Math.log10(lo), Math.log10(hi), fr.y1, fr.y0);
     const ticks = []; for (let e = Math.ceil(Math.log10(lo)); e <= Math.floor(Math.log10(hi)); e++) ticks.push(e);
-    const stepT = Math.max(1, Math.ceil(ticks.length / 5));
+    const stepT = Math.max(1, Math.ceil(ticks.length / Math.max(2, Math.floor((fr.y1 - fr.y0) / 26))));
     const yt = { ticks: ticks.filter((_, i) => i % stepT === 0), scale: ys };
     const xt = { ticks: niceTicks(0, n - 1, Math.max(2, Math.floor((fr.x1 - fr.x0) / 70))).filter(Number.isInteger), scale: xs };
     this.axes(ctx, fr, xt, yt, (v) => fmtNum(v), (e) => `10${sup(e)}`, 'event', 'F');
@@ -637,25 +660,54 @@ export class MeritChart extends Plot {
     const yT = Math.round(ys(Math.log10(s.targetF))) + 0.5;
     ctx.strokeStyle = T.good; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(fr.x0, yT); ctx.lineTo(fr.x1, yT); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = T.good; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText('target', fr.x1 - 2, yT - 2);
-    if (!h.length) return;
+    if (!h.length && !starts.length) return;
     ctx.save(); ctx.beginPath(); ctx.rect(fr.x0, fr.y0, fr.x1 - fr.x0, fr.y1 - fr.y0); ctx.clip();
-    ctx.beginPath();
-    h.forEach((p, i) => { const x = xs(i), y = ys(Math.log10(Math.max(p.F, lo))); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
-    ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
-    // grid enrichment: the merit changes its definition — a vertical marker separates the two grids
-    h.forEach((p, i) => {
-      if (p.mark !== 'grid') return;
-      const x = Math.round(xs(i)) + 0.5;
-      ctx.strokeStyle = T['ink-3']; ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, fr.y0); ctx.lineTo(x, fr.y1); ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = T['ink-3']; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.font = `10px ${T.font}`; ctx.fillText('grid +', x + 3, fr.y0 + 2); ctx.font = `11px ${T.font}`;
-    });
-    h.forEach((p, i) => {
-      if (!p.mark || p.mark === 'grid') return;
-      const x = xs(i), y = ys(Math.log10(Math.max(p.F, lo)));
-      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
-      ctx.fillStyle = p.mark === 'needle' ? T.needle : p.mark === 'growth' ? T['series-current'] : p.mark === 'cleanup' ? T['ink-3'] : T.good;
-      ctx.fill(); ctx.strokeStyle = T.card; ctx.lineWidth = 1.5; ctx.stroke();
-    });
+    const path = (arr) => { ctx.beginPath(); arr.forEach((p, i) => { const x = xs(i), y = ys(Math.log10(Math.max(p.F, lo))); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); };
+    ctx.lineJoin = 'round';
+    // multi‑start: every explored start as its own line — finished starts grey, the leader green, the start being
+    // explored in the accent colour, the hovered one orange on top (the same language as the spectrum ghosts)
+    if (starts.length) {
+      const all = (s.starts || []).map((st, i) => [st, i]).filter(([st]) => st && st.history && st.history.length);
+      const order = all.sort(([a, ia], [b, ib]) => (a.best ? 1 : 0) - (b.best ? 1 : 0) || (a.running ? 1 : 0) - (b.running ? 1 : 0) || (ia === s.highlight ? 1 : 0) - (ib === s.highlight ? 1 : 0));
+      for (const [st, i] of order) {
+        path(st.history);
+        const hl = i === s.highlight;
+        if (hl) { ctx.strokeStyle = T.needle; ctx.lineWidth = 2.5; ctx.globalAlpha = 1; }
+        else if (st.running) { ctx.strokeStyle = T.accent; ctx.lineWidth = 2; ctx.globalAlpha = 1; }
+        else if (st.best) { ctx.strokeStyle = T.good; ctx.lineWidth = 1.75; ctx.globalAlpha = 0.9; }
+        else { ctx.strokeStyle = T['ink-3']; ctx.lineWidth = 1.25; ctx.globalAlpha = 0.45; }
+        ctx.stroke(); ctx.globalAlpha = 1;
+        if (hl || st.running) {
+          const last = st.history[st.history.length - 1], x = xs(st.history.length - 1), y = ys(Math.log10(Math.max(last.F, lo)));
+          ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fillStyle = hl ? T.needle : T.accent; ctx.fill();
+        }
+      }
+      const hl = s.highlight != null && s.starts[s.highlight] && s.starts[s.highlight].history.length ? s.starts[s.highlight] : null;
+      if (hl && fr.y1 - fr.y0 > 80) {
+        const last = hl.history[hl.history.length - 1];
+        // bottom‑left corner: the histories start at the top left and end at the bottom right
+        ctx.fillStyle = T.ink; ctx.font = `600 11px ${T.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+        ctx.fillText(`${hl.name} · F = ${fmt.sci(last.F)} · ${hl.history.length - 1} events`, fr.x0 + 6, fr.y1 - 3); ctx.font = `11px ${T.font}`;
+      }
+    }
+    if (h.length) {
+      path(h);
+      ctx.strokeStyle = T['series-current']; ctx.lineWidth = 2; ctx.stroke();
+      // grid enrichment: the merit changes its definition — a vertical marker separates the two grids
+      h.forEach((p, i) => {
+        if (p.mark !== 'grid') return;
+        const x = Math.round(xs(i)) + 0.5;
+        ctx.strokeStyle = T['ink-3']; ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, fr.y0); ctx.lineTo(x, fr.y1); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = T['ink-3']; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.font = `10px ${T.font}`; ctx.fillText('grid +', x + 3, fr.y0 + 2); ctx.font = `11px ${T.font}`;
+      });
+      h.forEach((p, i) => {
+        if (!p.mark || p.mark === 'grid') return;
+        const x = xs(i), y = ys(Math.log10(Math.max(p.F, lo)));
+        ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = p.mark === 'needle' ? T.needle : p.mark === 'growth' ? T['series-current'] : p.mark === 'cleanup' ? T['ink-3'] : T.good;
+        ctx.fill(); ctx.strokeStyle = T.card; ctx.lineWidth = 1.5; ctx.stroke();
+      });
+    }
     ctx.restore();
   }
 }

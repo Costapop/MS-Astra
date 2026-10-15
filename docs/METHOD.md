@@ -94,8 +94,10 @@ polarizations, each built from its own residual (§4). For the unpolarized
 mean the residual is formed from the physical quantity `R̄` first and
 differentiated afterwards (`δR̄ = ½(δRs + δRp)`), as the specification
 requires. The chart draws the characteristic as the main curve and the
-polarizations as thin lines (in the `Rs & Rp` mode both targets — Rp dashed —
-and both spectra are drawn and edited); the dense‑grid check and the export
+polarizations as thin lines, s solid blue‑green and p dashed magenta; the targets
+are translucent bands at the required level (in the `Rs & Rp` mode both targets —
+tinted like their polarizations, the Rp band with a dashed edge — and both spectra
+are drawn and edited); the dense‑grid check and the export
 use the same definitions.
 
 ## 3. Merit function
