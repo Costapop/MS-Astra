@@ -20,6 +20,7 @@ Run `npm test` (Node 20+). All checks are automated in `tests/`.
 | ∂F/∂d_j, ∂R_l/∂d_j and the weighted residual rows at 30–72° for Rs, Rp, Rs & Rp and (Rs+Rp)/2, from air and BK7 | central finite differences; F = Σ e², ∇F = 2 Jᵀe; the Rs & Rp merit ½Σν[(Rs−R̃)²+(Rp−R̃)²] | relative error < 1e‑7 |
 | needle derivative at 35–70° for every characteristic, including an evanescent MgF₂ host at 70° from BK7 | finite‑width merit change, η = 0.0005 nm | relative error < 3e‑3 |
 | needle scan + refinement at 45° (air, unpolarized), 45° and 70° from BK7 | every negative minimum of g(z) lowers F for a 0.001 nm needle; refinement lowers F; reported F equals an independent evaluation | holds |
+| Rs & Rp with separate targets (Rs → 95 %, Rp → 2 %, zero‑weight points only in the Rp target) at 45° inside BK7 | F = ½(F_s + F_p) from the spectra; 42 residual rows with Σe² = F; central finite differences of ∇F; finite‑width needle check; a shared array equals the same target for both; maxDev honours each target's weights | relative errors < 1e‑7 (∇F), < 3e‑3 (needle); identities exact |
 
 ## Synthesis driver (`tests/synthesis.test.js`)
 
@@ -57,6 +58,12 @@ Run `npm test` (Node 20+). All checks are automated in `tests/`.
   Evanescent low‑index layers (AR task from BK7 at 75°) and the Rs‑only
   characteristic (air, 70°) run to a verified termination with finite
   thicknesses. Quarter‑wave starting designs are corrected for the angle.
+  Separate Rs/Rp targets: the *Polarizer 45°* preset (TiO₂/MgF₂, 500–600 nm,
+  inside BK7) reaches Rs ≥ 94 % and Rp ≤ 4 % with a verified termination,
+  the dense check and the reported grid carry both targets, and on a 3‑point
+  grid the enrichment adds points with both targets resampled consistently.
+  `sampleDualTarget`/`denseGridDual`: each target keeps its own transition
+  zones and normalised weights; the dense grid holds the jumps of both.
 * Termination (v2.1.2–v2.2.2): for every preset (now including the two
   oblique ones, run at their angle, medium and characteristic) at its own target and at an
   unreachable one, the reason sentence is backed by the recorded facts, the
@@ -72,7 +79,9 @@ The ZIP container is parsed entry by entry, CRC‑32 of every part is verified,
 and the sheet XML is checked for numeric and inline‑string cells. At oblique
 incidence the Spectrum and Verification sheets carry Rs and Rp columns and
 the Summary sheet records the angle, the incident medium, α and the target
-characteristic; at normal incidence the classic layout is unchanged. The
+characteristic; with separate Rs/Rp targets both sheets list the two targets,
+the two spectra, ΔRs/ΔRp and the per‑polarization weights; at normal
+incidence the classic layout is unchanged. The
 workbook was also opened with Microsoft‑compatible readers (openpyxl) during
 development.
 
@@ -88,7 +97,12 @@ tooltip show Rs and Rp, the structure chart labels the incident medium, an
 80° task from BK7 with evanescent MgF₂ layers runs to a verified stop, the
 sidebar and the header controls lock during a run, multi‑start exploration
 at 45° runs in the worker and replays the winner, and the Excel download
-carries the polarization columns; Live mode animates refinement, needle scan,
+carries the polarization columns; in the *Rs & Rp* mode (Polarizer 45°) the
+Rp target is edited on its own table and by dragging its dashed level on the
+chart, a double‑click splits the target whose level is nearest, the tooltip
+lists both targets and both spectra with their errors, switching to
+(Rs+Rp)/2 or to 0° hides the second target and switching back restores it,
+the run reaches both targets and multi‑start draws Rs/Rp ghost pairs; Live mode animates refinement, needle scan,
 candidate comparison, insertion, growth and cleanup; the edge filter with a
 20 nm transition zone reaches the target; multi‑start exploration runs in a
 background worker whose stages are streamed and animated on the charts

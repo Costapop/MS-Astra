@@ -100,10 +100,11 @@
           <button type="button" data-tab="target" role="tab" aria-selected="false">Target</button>
         </div>
         <div class="legend" id="spectrum-legend">
-          <span class="legend-item"><i class="swatch target"></i>Target R̃</span>
+          <span class="legend-item"><i class="swatch target"></i><span id="legend-target-text">Target R̃</span></span>
+          <span class="legend-item" id="legend-target2" hidden title="Target for the p‑polarization (Rs &amp; Rp: each polarization has its own target)"><i class="swatch target2"></i>Target R̃p</span>
           <span class="legend-item" id="legend-current" title="The target characteristic of the current design"><i class="swatch current"></i><span id="legend-current-text">Current R</span></span>
           <span class="legend-item" id="legend-rs" hidden title="s‑polarization (E perpendicular to the plane of incidence)"><i class="swatch pol-s"></i>Rs</span>
-          <span class="legend-item" id="legend-rp" hidden title="p‑polarization (E in the plane of incidence)"><i class="swatch pol-p"></i>Rp</span>
+          <span class="legend-item" id="legend-rp" hidden title="p‑polarization (E in the plane of incidence)"><i class="swatch pol-p" id="swatch-rp"></i><span id="legend-rp-text">Rp</span></span>
           <span class="legend-item" title="Optimization grid points on the target; hollow = zero weight, ring = added by grid enrichment"><i class="swatch grid"></i>Points</span>
           <span class="legend-item" id="legend-zone" hidden title="Zero-weight transition zone around a target jump"><i class="swatch zone"></i>Zone</span>
           <span class="legend-item" id="legend-ghost" hidden title="Multi‑start: the start being explored is dashed blue, finished starts are dashed grey, the leader dashed green"><i class="swatch ghost"></i>Starts</span>
@@ -141,9 +142,14 @@
           <p class="hint">Spectral points closer than half the zone width to a target jump get zero weight: an ideal edge cannot be matched and would otherwise dominate the merit.</p>
         </div>
         <div class="panel-col">
-          <h4>Target reflectance bands</h4>
-          <p class="hint">Edit the values here, or on the chart: drag a level or a boundary, double‑click a band to split it, double‑click a boundary to merge.</p>
+          <h4 id="bands-title">Target reflectance bands</h4>
+          <p class="hint" id="bands-hint">Edit the values here, or on the chart: drag a level or a boundary, double‑click a band to split it, double‑click a boundary to merge.</p>
           <div class="bands" id="bands"></div>
+          <div id="bands2-wrap" hidden>
+            <h4>Target Rp bands</h4>
+            <p class="hint">The p‑polarization has its own target (dashed on the chart); it shares the spectral range with the Rs target.</p>
+            <div class="bands" id="bands2"></div>
+          </div>
         </div>
       </div>
     </article>

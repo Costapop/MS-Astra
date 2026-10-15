@@ -87,3 +87,20 @@ test('result workbook records the angle, the incident medium and the target char
   assert.doesNotMatch(z0['xl/worksheets/sheet1.xml'], /<t>Rs<\/t>/);
   assert.match(z0['xl/worksheets/sheet3.xml'], /Normal, from Air \(n = 1\)/);
 });
+
+test('result workbook writes separate Rs and Rp targets (Rs & Rp characteristic) with per-polarization columns', () => {
+  const wl = [500, 550, 600], target = { s: [0.98, 0.98, 0.98], p: [0, 0, 0] }, weights = { s: [1 / 3, 1 / 3, 1 / 3], p: [1 / 3, 1 / 3, 1 / 3] };
+  const R = [0.5, 0.5, 0.5], Rs = [0.97, 0.985, 0.975], Rp = [0.01, 0.005, 0.02];
+  const layers = [{ m: 'TiO2', n: 2.45, d: 100 }, { m: 'MgF2', n: 1.38, d: 200 }];
+  const settings = { version: '2.3.0', substrate: { label: 'BK7', n: 1.52 }, ambient: { key: 'BK7', label: 'BK7', n: 1.52 }, angle: 45, pol: 'both', polLabel: 'Rs & Rp', dual: true, H: { key: 'TiO2', n: 2.45 }, L: { key: 'MgF2', n: 1.38 }, lambdaMin: 500, lambdaMax: 600, lambdaCenter: 550, points: 3, bands: [{ from: 500, to: 600, R: 0.98 }], bands2: [{ from: 500, to: 600, R: 0 }], startMaterial: { key: 'TiO2' }, startThickness: 100, maxLayers: 30, maxTOT: 5000, targetMerit: 1e-4, thinLayer: 1 };
+  const dense = { wavelengths: [500, 600], target: { s: [0.98, 0.98], p: [0, 0] }, weights: { s: [0.5, 0.5], p: [0.5, 0.5] }, R: [0.5, 0.5], Rs: [0.97, 0.975], Rp: [0.01, 0.02], F: 1e-4, maxDev: 0.02 };
+  const z = readZip(resultWorkbook({ settings, wavelengths: wl, target, weights, R, Rs, Rp, layers, result: { F: 1e-4, maxDev: 0.02, reason: 'Target merit reached', stats: {}, dense } }));
+  const s1 = z['xl/worksheets/sheet1.xml'], s3 = z['xl/worksheets/sheet3.xml'], s4 = z['xl/worksheets/sheet4.xml'];
+  assert.match(s1, /each polarization to its own target/);
+  assert.match(s1, /<t>Target Rs<\/t>.*<t>Target Rp<\/t>.*<t>Synthesized Rs<\/t>.*<t>Synthesized Rp<\/t>/);
+  assert.match(s1, /<v>0.98<\/v>.*<v>0<\/v>.*<v>0.985<\/v>.*<v>0.005<\/v>/);
+  assert.match(s3, /Target characteristic.*Rs &amp; Rp — Rs and Rp each to its own target/);
+  assert.match(s3, /Target bands.*Rs: 500.0–600.0 nm 98.00 % \| Rp: 500.0–600.0 nm 0.00 %/);
+  assert.match(s4, /Rs and Rp against their own targets/);
+  assert.match(s4, /<t>Counted Rs<\/t>.*<t>Counted Rp<\/t>/);
+});

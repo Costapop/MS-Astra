@@ -249,6 +249,7 @@ test('the termination summary names the decisive stopping condition and agrees w
 
 /* ---------------- v2.3: oblique incidence ---------------- */
 import { assess, opticsModel } from '../src/optics.js';
+import { sampleDualTarget } from '../src/config.js';
 
 function obliqueConfig(key, extra = {}) {
   const p = PRESETS[key]; const bands = bandsFromPreset(p);
@@ -296,4 +297,29 @@ test('oblique synthesis: evanescent low-index layers (from BK7 at 75°) and the 
   const q45 = s45.find((s) => /SiO2 1 QWOT/.test(s.name)), q0 = s0.find((s) => /SiO2 1 QWOT/.test(s.name));
   const cosG = Math.sqrt(1 - (1.52 * Math.sin(Math.PI / 4) / 1.46) ** 2);
   assert.ok(Math.abs(q45.start.thickness - q0.start.thickness / cosG) < 1e-9);
+});
+
+test('separate Rs and Rp targets: the 45° polarizer preset (Rs → 98 %, Rp → 0 inside BK7) reaches its target; dense check and enrichment work on both targets', () => {
+  const p = PRESETS.polarizer;
+  const bS = bandsFromPreset(p), bP = bandsFromPreset(p, 'bands2');
+  const wl = uniformGrid(p.range[0], p.range[1], 41); const s = sampleDualTarget(bS, bP, wl, 0);
+  const H = materialByKey(p.H), L = materialByKey(p.L);
+  const cfg = { wavelengths: wl, target: s.target, weights: s.weights, bands: bS, bands2: bP, transition: 0, ns: 1.52, na: 1.52, angle: 45, pol: 'both', materials: { H: { n: H.n, m: H.key }, L: { n: L.n, m: L.key } },
+    start: { material: p.start.material, thickness: p.start.thickness }, maxLayers: p.maxLayers, maxOpticalThickness: p.maxTOT, targetMerit: p.merit, thinLayer: 1, budgetMs: 90000 };
+  const { done } = runAll(cfg);
+  assert.match(done.reason, /^Target merit reached/, done.reason);
+  assert.ok(done.stop.verified, done.stop.checks.filter((c) => !c.ok).map((c) => c.name).join('; '));
+  const model = opticsModel({ ns: 1.52, na: 1.52, angle: 45, pol: 'both' });
+  const a = assess(done.layers, wl, s.target, s.weights, model);
+  assert.ok(Math.abs(a.F - done.F) < 1e-15);
+  assert.ok(Math.min(...a.Rs) > 0.94 && Math.max(...a.Rp) < 0.04, `Rs ≥ ${Math.min(...a.Rs)}, Rp ≤ ${Math.max(...a.Rp)}`);
+  assert.ok(done.dense && done.dense.target.s && done.dense.target.p && done.dense.F <= p.merit);
+  // the reported grid carries both targets
+  assert.ok(done.grid.target.s.length === done.grid.wavelengths.length && done.grid.target.p.length === done.grid.wavelengths.length);
+  // enrichment on a very sparse grid with two targets adds points and keeps both targets consistent
+  const wl5 = uniformGrid(p.range[0], p.range[1], 3); const s5 = sampleDualTarget(bS, bP, wl5, 0);
+  const { done: d5 } = runAll({ ...cfg, wavelengths: wl5, target: s5.target, weights: s5.weights, budgetMs: 60000 });
+  assert.ok(d5.grid.wavelengths.length > 3 && d5.stats.pointsAdded > 0, 'grid enriched');
+  const s6 = sampleDualTarget(bS, bP, d5.grid.wavelengths, 0);
+  assert.deepEqual(Array.from(d5.grid.target.s), Array.from(s6.target.s)); assert.deepEqual(Array.from(d5.grid.target.p), Array.from(s6.target.p));
 });

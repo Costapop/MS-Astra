@@ -315,3 +315,41 @@ test('oblique incidence: scanNeedles and the refinement work on the generalized 
     }
   }
 });
+
+test('Rs & Rp with separate targets: merit, residual rows, gradient and needle derivative use each polarization\'s own target and weights', () => {
+  const layers = [H(74), L(103), H(131), L(88), H(40), L(210)];
+  const wl = grid(450, 650, 21);
+  const tS = new Float64Array(21).fill(0.95), tP = new Float64Array(21).fill(0.02);
+  const wS = meritWeights(21), wP = new Float64Array(21);
+  for (let l = 0; l < 21; l++) wP[l] = (l % 3 === 0 ? 0 : 1); let sum = 0; for (const x of wP) sum += x; for (let l = 0; l < 21; l++) wP[l] /= sum;   // zero-weight points only in the Rp target
+  const target = { s: tS, p: tP }, weights = { s: wS, p: wP };
+  const model = opticsModel({ ns: 1.52, na: 1.52, angle: 45, pol: 'both' });
+  const ev = evaluate(layers, wl, target, weights, model, true);
+  const sp = spectra(layers, wl, model);
+  let Fb = 0; for (let l = 0; l < 21; l++) Fb += 0.5 * (wS[l] * (sp.Rs[l] - tS[l]) ** 2 + wP[l] * (sp.Rp[l] - tP[l]) ** 2);
+  assert.ok(Math.abs(ev.F - Fb) < 1e-15 && Math.abs(assess(layers, wl, target, weights, model).F - Fb) < 1e-15 && Math.abs(meritOf(layers, wl, target, weights, model) - Fb) < 1e-15);
+  let s2 = 0; for (let i = 0; i < ev.rows; i++) s2 += ev.resid[i] ** 2;
+  assert.ok(ev.rows === 42 && Math.abs(s2 - ev.F) < 1e-15);
+  for (let j = 0; j < layers.length; j++) {
+    const h = 1e-4;
+    const lp = layers.map((x, i) => ({ ...x, d: x.d + (i === j ? h : 0) })), lm = layers.map((x, i) => ({ ...x, d: x.d - (i === j ? h : 0) }));
+    const fd = (meritOf(lp, wl, target, weights, model) - meritOf(lm, wl, target, weights, model)) / (2 * h);
+    assert.ok(Math.abs(ev.grad[j] - fd) < 1e-7 * Math.max(1, Math.abs(fd)) + 1e-11, `layer ${j}: ${ev.grad[j]} vs ${fd}`);
+  }
+  const F0 = ev.F; let checked = 0;
+  for (const [j, x] of [[2, 60], [1, 50], [3, 44], [5, 120]]) {
+    const nm = layers[j].m === 'H' ? 1.38 : 2.30;
+    const g = needleDerivative(layers, ev.adjoint, j, x, nm);
+    const eta = 5e-4;
+    const fd = (meritOf(insertNeedle(layers, { layer: j, x, z: 0, kind: 'interior' }, eta, { n: nm, m: nm > 2 ? 'H' : 'L' }), wl, target, weights, model) - F0) / eta;
+    if (Math.abs(g) < 1e-9) continue;
+    assert.ok(Math.abs(fd - g) < 3e-3 * Math.abs(g), `needle layer ${j}: ${fd} vs ${g}`); checked++;
+  }
+  assert.ok(checked >= 3);
+  // a shared array is the same target for both polarizations; the maximum deviation respects the per-polarization weights
+  const shared = assess(layers, wl, tS, wS, model), dualA = assess(layers, wl, { s: tS, p: tS }, { s: wS, p: wS }, model);
+  assert.ok(Math.abs(shared.F - dualA.F) < 1e-15 && Math.abs(shared.maxDev - dualA.maxDev) < 1e-15);
+  const a = assess(layers, wl, target, weights, model);
+  let md = 0; for (let l = 0; l < 21; l++) { md = Math.max(md, Math.abs(sp.Rs[l] - tS[l])); if (wP[l] > 0) md = Math.max(md, Math.abs(sp.Rp[l] - tP[l])); }
+  assert.ok(Math.abs(a.maxDev - md) < 1e-15);
+});

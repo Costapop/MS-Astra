@@ -43,7 +43,9 @@ export const PRESETS = {
   splitter: { name: 'Beam splitter 50 %', range: [450, 650], bands: [{ t: 1, R: 0.5 }], H: 'Ta2O5', L: 'SiO2', start: { material: 'Ta2O5', thickness: 100 }, maxLayers: 20, maxTOT: 3000, merit: 1e-5 },
   cube: { name: 'Cube splitter 45°', range: [450, 650], bands: [{ t: 1, R: 0.5 }], H: 'Ta2O5', L: 'SiO2', start: { material: 'Ta2O5', thickness: 100 }, maxLayers: 24, maxTOT: 4000, merit: 1e-4, angle: 45, pol: 'avg', ambient: 'BK7' },
   ar45: { name: 'AR at 45°', range: [450, 650], bands: [{ t: 1, R: 0 }], H: 'TiO2', L: 'MgF2', start: { material: 'TiO2', thickness: 100 }, maxLayers: 14, maxTOT: 1800, merit: 3e-5, angle: 45, pol: 'both', ambient: 'Air' },
+  polarizer: { name: 'Polarizer 45°', range: [500, 600], bands: [{ t: 1, R: 0.98 }], bands2: [{ t: 1, R: 0 }], H: 'TiO2', L: 'MgF2', start: { material: 'TiO2', thickness: 100 }, maxLayers: 30, maxTOT: 5000, merit: 1e-4, angle: 45, pol: 'both', ambient: 'BK7' },
 };
+/** For the «Rs & Rp» characteristic a preset may give its own Rp bands (`bands2`); otherwise the Rs bands are used for both. */
 
 export const DEFAULTS = {
   preset: 'mirror',
@@ -116,10 +118,33 @@ export function denseGrid(bands, lambdaMin, lambdaMax, transition = 0, points) {
   return { wavelengths: wl, target: s.target, weights: s.weights };
 }
 
-export function bandsFromPreset(p) {
+export function bandsFromPreset(p, which = 'bands') {
   const [a, b] = p.range;
   let from = a;
-  return p.bands.map((x) => { const to = a + (b - a) * x.t; const band = { from, to, R: x.R }; from = to; return band; });
+  return (p[which] || p.bands).map((x) => { const to = a + (b - a) * x.t; const band = { from, to, R: x.R }; from = to; return band; });
+}
+
+/**
+ * Two targets on one grid for the «Rs & Rp» characteristic: the Rs bands and
+ * the Rp bands are sampled separately (each with its own transition zones
+ * and weights normalised to one); the merit is ½(F_s + F_p).
+ * Returns { target: {s, p}, weights: {s, p}, excluded }.
+ */
+export function sampleDualTarget(bandsS, bandsP, grid, transition = 0) {
+  const a = sampleTarget(bandsS, grid, transition), b = sampleTarget(bandsP, grid, transition);
+  return { target: { s: a.target, p: b.target }, weights: { s: a.weights, p: b.weights }, excluded: a.excluded + b.excluded };
+}
+
+/** Dense verification grid for two targets: uniform points plus both sides of every jump of either target. */
+export function denseGridDual(bandsS, bandsP, lambdaMin, lambdaMax, transition = 0, points) {
+  const count = points ?? 2001;
+  const span = lambdaMax - lambdaMin;
+  const list = Array.from(uniformGrid(lambdaMin, lambdaMax, count));
+  for (const bands of [bandsS, bandsP]) for (const b of bands.slice(0, -1)) { const eps = Math.max(1e-6 * span, 1e-6); list.push(b.to - eps, b.to + eps); }
+  list.sort((a, b) => a - b);
+  const wl = Float64Array.from(list.filter((w, i) => i === 0 || w !== list[i - 1]));
+  const s = sampleDualTarget(bandsS, bandsP, wl, transition);
+  return { wavelengths: wl, target: s.target, weights: s.weights };
 }
 
 /** Validate the full configuration; returns { ok, errors: [] }. */
@@ -137,11 +162,13 @@ export function validateConfig(c) {
   if (c.startThickness * (c.startMaterial?.n || 1) > c.maxTOT) errors.push('Starting optical thickness exceeds the optical‑thickness limit.');
   if (!(c.thinLayer >= 0)) errors.push('Thin‑layer threshold must be non‑negative.');
   if (!((c.transition ?? 0) >= 0)) errors.push('Transition‑zone width must be non‑negative.');
-  if ((c.transition ?? 0) > 0 && (c.bands || []).length > 1) {
+  const dual = c.pol === 'both' && (c.angle ?? 0) > 0;
+  if ((c.transition ?? 0) > 0 && ((c.bands || []).length > 1 || (dual && (c.bands2 || []).length > 1))) {
     const span = c.lambdaMax - c.lambdaMin;
     if (c.transition >= span / 2) errors.push('Transition zone is too wide for the spectral range.');
   }
   for (const b of c.bands || []) if (!(b.R >= 0 && b.R <= 1)) errors.push('Target reflectance must be between 0 and 1.');
+  if (dual) for (const b of c.bands2 || []) if (!(b.R >= 0 && b.R <= 1)) errors.push('Target Rp must be between 0 and 1.');
   const angle = c.angle ?? 0;
   if (!(angle >= 0 && angle <= 89.9)) errors.push('Angle of incidence must be from 0 to 89.9 degrees.');
   if (c.pol != null && !['s', 'p', 'both', 'avg'].includes(c.pol)) errors.push('Choose the target characteristic: Rs, Rp, Rs & Rp or (Rs + Rp)/2.');

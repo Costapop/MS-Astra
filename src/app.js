@@ -3,8 +3,8 @@
  * runner with demonstration pacing and animation, multi‑start exploration in
  * a background worker, dashboard updates, export.
  */
-import { LAYER_MATERIALS, SUBSTRATES, AMBIENTS, PRESETS, DEFAULTS, materialByKey, ambientByKey, uniformGrid, sampleTarget, bandsFromPreset, validateConfig } from './config.js';
-import { reflectance, spectra, meritOf, opticsModel, totalOpticalThickness, POLARIZATIONS, polarizationLabel } from './optics.js';
+import { LAYER_MATERIALS, SUBSTRATES, AMBIENTS, PRESETS, DEFAULTS, materialByKey, ambientByKey, uniformGrid, sampleTarget, sampleDualTarget, bandsFromPreset, validateConfig } from './config.js';
+import { reflectance, spectra, meritOf, assess, opticsModel, totalOpticalThickness, POLARIZATIONS, polarizationLabel, polTarget } from './optics.js';
 import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
@@ -19,6 +19,7 @@ const settings = {
   preset: DEFAULTS.preset,
   lambdaMin: 450, lambdaMax: 650, points: DEFAULTS.points,
   bands: [{ from: 450, to: 650, R: 0.95 }],
+  bands2: [{ from: 450, to: 650, R: 0.95 }],   // the Rp target of the «Rs & Rp» characteristic (Rs uses `bands`)
   transition: DEFAULTS.transition,
   H: 'Ta2O5', L: 'SiO2', substrate: DEFAULTS.substrate, ambient: DEFAULTS.ambient,
   angle: DEFAULTS.angle, pol: DEFAULTS.pol,
@@ -33,6 +34,7 @@ function applyPreset(key) {
   settings.preset = key;
   settings.lambdaMin = p.range[0]; settings.lambdaMax = p.range[1];
   settings.bands = bandsFromPreset(p);
+  settings.bands2 = bandsFromPreset(p, 'bands2');
   settings.transition = p.transition ?? 0;
   settings.H = p.H; settings.L = p.L;
   settings.angle = p.angle ?? 0; settings.pol = p.pol ?? 'avg'; settings.ambient = p.ambient ?? 'Air';
@@ -48,6 +50,9 @@ function ambient() { return ambientByKey(settings.ambient); }
 /** Optical model of the current task: substrate, incident medium, angle of incidence, target characteristic. */
 function model() { return opticsModel({ ns: substrate().n, na: ambient().n, angle: settings.angle, pol: settings.pol }); }
 const oblique = () => settings.angle > 0;
+/** «Rs & Rp» at oblique incidence: separate targets for the two polarizations. */
+const dual = () => oblique() && settings.pol === 'both';
+const cloneBands = (b) => b.map((x) => ({ ...x }));
 /** Label of the characteristic drawn as the main curve ((Rs+Rp)/2 is displayed for 'both'). */
 function charLabel() { return !oblique() ? 'R' : settings.pol === 'both' ? '(Rs + Rp)/2' : polarizationLabel(settings.pol); }
 function incidenceText() { return oblique() ? `${settings.angle}° from ${ambient().label} (${ambient().n.toFixed(2)}) · target ${polarizationLabel(settings.pol)}` : `normal, from ${ambient().label} (${ambient().n.toFixed(2)})`; }
@@ -57,7 +62,7 @@ const lambdaCenter = () => (settings.lambdaMin + settings.lambdaMax) / 2;
 
 function buildProblem() {
   const grid = uniformGrid(settings.lambdaMin, settings.lambdaMax, settings.points);
-  const s = sampleTarget(settings.bands, grid, settings.transition);
+  const s = dual() ? sampleDualTarget(settings.bands, settings.bands2, grid, settings.transition) : sampleTarget(settings.bands, grid, settings.transition);
   return { grid, target: s.target, weights: s.weights, excluded: s.excluded };
 }
 
@@ -66,7 +71,7 @@ function engineConfig() {
   const H = { n: materialH().n, m: materialH().key }, L = { n: materialL().n, m: materialL().key };
   return {
     wavelengths: grid, target, weights, ns: substrate().n, na: ambient().n, angle: settings.angle, pol: settings.pol,
-    bands: settings.bands.map((b) => ({ ...b })), transition: settings.transition,
+    bands: cloneBands(settings.bands), bands2: dual() ? cloneBands(settings.bands2) : null, transition: settings.transition,
     materials: { H, L },
     start: { material: startMat().key, thickness: settings.startThickness },
     maxLayers: settings.maxLayers, maxOpticalThickness: settings.maxTOT, targetMerit: settings.targetMerit,
@@ -94,17 +99,28 @@ function renderPresets() {
 }
 
 function renderBands() {
-  const box = $('bands'); box.innerHTML = '';
-  const head = document.createElement('div'); head.className = 'band-head'; head.innerHTML = '<span>from, nm</span><span>to, nm</span><span>R, %</span>'; box.appendChild(head);
-  settings.bands.forEach((b, i) => {
+  renderBandSet($('bands'), settings.bands, dual() ? 'Rs' : 'R');
+  $('bands2-wrap').hidden = !dual();
+  $('bands-title').textContent = dual() ? 'Target Rs bands' : 'Target reflectance bands';
+  $('bands-hint').textContent = dual()
+    ? 'Rs and Rp each have their own target. Edit the values here, or on the chart: drag a level or a boundary of either target (Rs solid, Rp dashed), double‑click a band to split it, double‑click a boundary to merge.'
+    : 'Edit the values here, or on the chart: drag a level or a boundary, double‑click a band to split it, double‑click a boundary to merge.';
+  if (dual()) renderBandSet($('bands2'), settings.bands2, 'Rp');
+}
+
+/** One editable band table. The spectral range is shared by every band set. */
+function renderBandSet(box, bands, label) {
+  box.innerHTML = '';
+  const head = document.createElement('div'); head.className = 'band-head'; head.innerHTML = `<span>from, nm</span><span>to, nm</span><span>${label}, %</span>`; box.appendChild(head);
+  bands.forEach((b, i) => {
     const row = document.createElement('div'); row.className = 'band';
     const from = document.createElement('input'); from.type = 'number'; from.value = Math.round(b.from); from.step = 1; from.disabled = i > 0; from.title = i > 0 ? 'Set by the previous band' : 'Lower bound of the spectral range';
     const to = document.createElement('input'); to.type = 'number'; to.value = Math.round(b.to); to.step = 1;
     const R = document.createElement('input'); R.type = 'number'; R.value = +(100 * b.R).toFixed(2); R.step = 0.5; R.min = 0; R.max = 100;
-    const x = document.createElement('button'); x.type = 'button'; x.className = 'x'; x.textContent = '×'; x.title = 'Merge this band'; x.disabled = settings.bands.length === 1;
+    const x = document.createElement('button'); x.type = 'button'; x.className = 'x'; x.textContent = '×'; x.title = 'Merge this band'; x.disabled = bands.length === 1;
     from.addEventListener('change', () => { const v = Math.max(100, Math.min(b.to - 1, Number(from.value))); settings.lambdaMin = v; b.from = v; onSettingsChanged(); });
     to.addEventListener('change', () => {
-      const next = settings.bands[i + 1];
+      const next = bands[i + 1];
       const lo = b.from + 1, hi = next ? next.to - 1 : 20000;
       const v = Math.max(lo, Math.min(hi, Number(to.value)));
       b.to = v; if (next) next.from = v; else settings.lambdaMax = v;
@@ -112,19 +128,19 @@ function renderBands() {
     });
     R.addEventListener('change', () => { b.R = Math.max(0, Math.min(1, Number(R.value) / 100)); onSettingsChanged(); });
     x.addEventListener('click', () => {
-      if (settings.bands.length === 1) return;
-      if (i > 0) { settings.bands[i - 1].to = b.to; settings.bands.splice(i, 1); }
-      else { settings.bands[1].from = b.from; settings.bands.splice(0, 1); }
+      if (bands.length === 1) return;
+      if (i > 0) { bands[i - 1].to = b.to; bands.splice(i, 1); }
+      else { bands[1].from = b.from; bands.splice(0, 1); }
       onSettingsChanged();
     });
     row.append(from, to, R, x); box.appendChild(row);
   });
   const add = document.createElement('button'); add.type = 'button'; add.className = 'chip band-add'; add.textContent = '+ Split widest band';
   add.addEventListener('click', () => {
-    let wi = 0; settings.bands.forEach((b, i) => { if (b.to - b.from > settings.bands[wi].to - settings.bands[wi].from) wi = i; });
-    const b = settings.bands[wi]; const mid = Math.round((b.from + b.to) / 2);
+    let wi = 0; bands.forEach((b, i) => { if (b.to - b.from > bands[wi].to - bands[wi].from) wi = i; });
+    const b = bands[wi]; const mid = Math.round((b.from + b.to) / 2);
     if (mid - b.from < 2) return;
-    settings.bands.splice(wi, 1, { from: b.from, to: mid, R: b.R }, { from: mid, to: b.to, R: b.R });
+    bands.splice(wi, 1, { from: b.from, to: mid, R: b.R }, { from: mid, to: b.to, R: b.R });
     onSettingsChanged();
   });
   box.appendChild(add);
@@ -145,7 +161,7 @@ function syncForm() {
   $('max-layers').value = settings.maxLayers; $('max-tot').value = settings.maxTOT; $('target-merit').value = settings.targetMerit.toExponential(0).replace('e+', 'e');
   $('thin-layer').value = settings.thinLayer; $('needle-width').value = settings.needleWidth; $('candidates').value = settings.candidates;
   $('dense-check').checked = settings.denseCheck; $('enrich-grid').checked = settings.enrichGrid; $('enrich-grid').disabled = !settings.denseCheck;
-  $('legend-zone').hidden = !(settings.transition > 0 && settings.bands.length > 1);
+  $('legend-zone').hidden = !(settings.transition > 0 && (settings.bands.length > 1 || (dual() && settings.bands2.length > 1)));
   renderPresets(); renderBands(); updateMeritHint(); updateLegendMaterials(); updateIncidence(); updateStartHint(); renderPresetSummary();
 }
 
@@ -156,12 +172,19 @@ function updateIncidence() {
   const evan = [materialH(), materialL()].filter((m) => al >= m.n).map((m) => m.label);
   $('model-hint').textContent = `Isotropic, homogeneous, lossless, non‑dispersive layers; semi‑infinite substrate; ${oblique() ? `incidence at ${settings.angle}° from ${ambient().label} (n = ${ambient().n.toFixed(2)})` : `normal incidence from ${ambient().label} (n = ${ambient().n.toFixed(2)})`}.`;
   $('incidence-hint').innerHTML = oblique()
-    ? `Plane wave from ${ambient().label} (n = ${ambient().n.toFixed(2)}, chosen in the sidebar) at ${settings.angle}°: α = n<sub>a</sub> sin θ = ${al.toFixed(3)}. s and p polarizations are computed with the polarization admittances q = n cos γ (s) and n / cos γ (p); ${settings.pol === 'avg' ? 'the target applies to the unpolarized reflectance (Rs + Rp)/2' : settings.pol === 'both' ? 'the target applies to Rs and to Rp at once: F = ½⟨(Rs − R̃)² + (Rp − R̃)²⟩' : `the target applies to ${polarizationLabel(settings.pol)} only`}.${evan.length ? ` ${evan.join(' and ')} layers are evanescent at this angle (α ≥ n): frustrated total internal reflection, handled exactly.` : ''}`
-    : `Normal incidence from ${ambient().label} (n = ${ambient().n.toFixed(2)}): Rs = Rp = R. Set an angle to design for oblique incidence; the target characteristic then chooses Rs, Rp, both or the unpolarized mean.`;
-  $('legend-current-text').textContent = `Current ${charLabel()}`;
-  // the other polarization(s) as thin lines: both for the mean / both characteristics, the complementary one for Rs or Rp
-  $('legend-rs').hidden = !oblique() || settings.pol === 's'; $('legend-rp').hidden = !oblique() || settings.pol === 'p';
-  spectrum.set({ showPols: oblique(), showRs: settings.pol !== 's', showRp: settings.pol !== 'p', charLabel: charLabel() });
+    ? `Plane wave from ${ambient().label} (n = ${ambient().n.toFixed(2)}, chosen in the sidebar) at ${settings.angle}°: α = n<sub>a</sub> sin θ = ${al.toFixed(3)}. s and p polarizations are computed with the polarization admittances q = n cos γ (s) and n / cos γ (p); ${settings.pol === 'avg' ? 'the target applies to the unpolarized reflectance (Rs + Rp)/2' : settings.pol === 'both' ? 'Rs and Rp each have their own target bands (below and on the chart): F = ½[⟨(Rs − R̃s)²⟩ + ⟨(Rp − R̃p)²⟩]' : `the target applies to ${polarizationLabel(settings.pol)} only`}.${evan.length ? ` ${evan.join(' and ')} layers are evanescent at this angle (α ≥ n): frustrated total internal reflection, handled exactly.` : ''}`
+    : `Normal incidence from ${ambient().label} (n = ${ambient().n.toFixed(2)}): Rs = Rp = R. Set an angle to design for oblique incidence; the target characteristic then chooses Rs, Rp, separate Rs and Rp targets, or the unpolarized mean.`;
+  const d = dual();
+  $('legend-target-text').textContent = d ? 'Target R̃s' : 'Target R̃';
+  $('legend-target2').hidden = !d;
+  $('legend-current-text').textContent = d ? 'Current Rs' : `Current ${charLabel()}`;
+  // the other polarization(s) as thin lines: both for the mean characteristic, the complementary one for Rs or Rp;
+  // in the «Rs & Rp» mode Rs and Rp are both full curves (Rp dashed)
+  $('legend-rs').hidden = !oblique() || settings.pol === 's' || d;
+  $('legend-rp').hidden = !oblique() || settings.pol === 'p';
+  $('legend-rp-text').textContent = d ? 'Current Rp' : 'Rp';
+  $('swatch-rp').classList.toggle('thick', d);
+  spectrum.set({ dual: d, bands2: d ? settings.bands2 : null, showPols: oblique(), showRs: settings.pol !== 's', showRp: settings.pol !== 'p', charLabel: charLabel() });
   $('structure-ambient').textContent = `substrate → ${settings.ambient === 'Air' ? 'air' : ambient().label}`;
   structure.set({ ambient: settings.ambient === 'Air' ? 'air' : ambient().label, na: ambient().n });
 }
@@ -185,7 +208,9 @@ function renderPresetSummary() {
   const H = materialH(), L = materialL();
   const rows = [
     ['Spectral range', `${settings.lambdaMin}–${settings.lambdaMax} nm · ${settings.points} points${settings.transition ? ` · transition zone ${settings.transition} nm` : ''}`],
-    ['Target bands', settings.bands.map((b) => `${Math.round(b.from)}–${Math.round(b.to)} nm: R = ${(100 * b.R).toFixed(1)} %`).join('; ')],
+    ['Target bands', dual()
+      ? `Rs: ${settings.bands.map((b) => `${Math.round(b.from)}–${Math.round(b.to)} nm ${(100 * b.R).toFixed(1)} %`).join('; ')} · Rp: ${settings.bands2.map((b) => `${Math.round(b.from)}–${Math.round(b.to)} nm ${(100 * b.R).toFixed(1)} %`).join('; ')}`
+      : settings.bands.map((b) => `${Math.round(b.from)}–${Math.round(b.to)} nm: R = ${(100 * b.R).toFixed(1)} %`).join('; ')],
     ['Materials', `H = ${H.label} (${H.n.toFixed(2)}), L = ${L.label} (${L.n.toFixed(2)}), substrate ${substrate().label} (${substrate().n.toFixed(2)})`],
     ['Incidence', incidenceText()],
     ['Starting design', settings.startMode === 'multi' ? `multi‑start (10 designs, ${settings.exploreBudget} s each)` : `${startMat().label} ${settings.startThickness} nm`],
@@ -204,8 +229,8 @@ function updateStartHint() {
 
 function bindForm() {
   const num = (id, key, parse = Number) => $(id).addEventListener('change', () => { settings[key] = parse($(id).value); onSettingsChanged(); });
-  $('lambda-min').addEventListener('change', () => { const v = Number($('lambda-min').value); settings.lambdaMin = v; settings.bands[0].from = v; onSettingsChanged(); });
-  $('lambda-max').addEventListener('change', () => { const v = Number($('lambda-max').value); settings.lambdaMax = v; settings.bands[settings.bands.length - 1].to = v; onSettingsChanged(); });
+  $('lambda-min').addEventListener('change', () => { const v = Number($('lambda-min').value); settings.lambdaMin = v; onSettingsChanged(); });
+  $('lambda-max').addEventListener('change', () => { const v = Number($('lambda-max').value); settings.lambdaMax = v; onSettingsChanged(); });
   num('points', 'points', (v) => Math.round(Number(v)));
   num('transition', 'transition');
   $('mat-h').addEventListener('change', () => { settings.H = $('mat-h').value; onSettingsChanged(); });
@@ -227,9 +252,15 @@ function bindForm() {
 }
 
 function onSettingsChanged() {
-  settings.bands.sort((a, b) => a.from - b.from);
-  settings.bands[0].from = settings.lambdaMin; settings.bands[settings.bands.length - 1].to = settings.lambdaMax;
-  for (let i = 0; i < settings.bands.length - 1; i++) settings.bands[i + 1].from = settings.bands[i].to;
+  if (!settings.bands2 || !settings.bands2.length) settings.bands2 = cloneBands(settings.bands);
+  for (const bands of [settings.bands, settings.bands2]) {
+    bands.sort((a, b) => a.from - b.from);
+    bands[0].from = settings.lambdaMin; bands[bands.length - 1].to = settings.lambdaMax;
+    for (let i = 0; i < bands.length - 1; i++) bands[i + 1].from = bands[i].to;
+    // a range narrowed below a band: clamp the inner boundaries into the range
+    for (let i = 0; i < bands.length - 1; i++) bands[i].to = Math.max(settings.lambdaMin + 1, Math.min(settings.lambdaMax - 1, bands[i].to));
+    for (let i = 0; i < bands.length - 1; i++) bands[i + 1].from = bands[i].to;
+  }
   settings.preset = null;
   syncForm();
   resetRun();
@@ -251,11 +282,11 @@ const needle = new NeedleChart($('needle'), $('tt-needle'));
 const structure = new StructureChart($('structure'), $('tt-structure'));
 const meritChart = new MeritChart($('merit'));
 
-spectrum.onChange = ({ bands, lambdaMin, lambdaMax, commit }) => {
-  settings.bands = bands; settings.lambdaMin = lambdaMin; settings.lambdaMax = lambdaMax; settings.preset = null;
+spectrum.onChange = ({ bands, bands2, lambdaMin, lambdaMax, commit }) => {
+  settings.bands = bands; if (bands2) settings.bands2 = bands2; settings.lambdaMin = lambdaMin; settings.lambdaMax = lambdaMax; settings.preset = null;
   if (commit) { onSettingsChanged(); } else {
     const { grid, target, weights } = buildProblem();
-    spectrum.set({ bands, lambdaMin, lambdaMax, grid, target, weights });
+    spectrum.set({ bands, bands2: dual() ? settings.bands2 : null, lambdaMin, lambdaMax, grid, target, weights });
     $('lambda-min').value = lambdaMin; $('lambda-max').value = lambdaMax; renderBands();
   }
 };
@@ -298,7 +329,7 @@ function setInitialDesign() {
   view.displayGrid = uniformGrid(settings.lambdaMin, settings.lambdaMax, DISPLAY_POINTS); view.curveDirty = true;
   view.goalXmax = Math.max(50, settings.startThickness * 1.08); view.xmax = view.goalXmax;
   view.highlight = null; view.insertion = null; view.candidate = null;
-  spectrum.set({ lambdaMin: settings.lambdaMin, lambdaMax: settings.lambdaMax, bands: settings.bands, grid, target, weights, added: run.added, transition: settings.transition, R: view.R, curve: null, editable: true });
+  spectrum.set({ lambdaMin: settings.lambdaMin, lambdaMax: settings.lambdaMax, bands: settings.bands, bands2: dual() ? settings.bands2 : null, dual: dual(), grid, target, weights, added: run.added, transition: settings.transition, R: view.R, curve: null, editable: true });
   needle.set({ xmax: view.xmax, layers: view.layers, scan: null, candidate: null, insertion: null, stale: false });
   structure.set({ xmax: view.xmax, layers: view.layers, nmax: Math.max(materialH().n, materialL().n, ambient().n), highlight: null, substrate: substrate().label, ns: substrate().n, ambient: settings.ambient === 'Air' ? 'air' : ambient().label, na: ambient().n });
   meritChart.set({ history: [], targetF: settings.targetMerit });
@@ -325,7 +356,9 @@ function updateTilesEntry({ F, layers, stage }) {
   $('t-rms').textContent = `${(100 * Math.sqrt(Math.max(F, 0))).toFixed(3)} %`;
   if (run.dense) $('t-maxdev').textContent = `dense grid: ${(100 * Math.sqrt(run.dense.F)).toFixed(3)} % · max ${(100 * run.dense.maxDev).toFixed(2)} p.p.`;
   else if (run.problem && view.goalR) {
-    let md = 0; for (let i = 0; i < view.goalR.length; i++) if (run.problem.weights[i] > 0) md = Math.max(md, Math.abs(view.goalR[i] - run.problem.target[i]));
+    let md = 0;
+    if (dual()) md = assess(layers, run.problem.grid, run.problem.target, run.problem.weights, model()).maxDev;
+    else { const t = polTarget(run.problem.target, 's'), w = polTarget(run.problem.weights, 's'); for (let i = 0; i < view.goalR.length; i++) if (w[i] > 0) md = Math.max(md, Math.abs(view.goalR[i] - t[i])); }
     $('t-maxdev').textContent = `max |ΔR| ${(100 * md).toFixed(2)} p.p.`;
   }
   $('t-layers').textContent = String(layers.length); $('t-layers-sub').textContent = `of ${settings.maxLayers} max`;
@@ -661,8 +694,10 @@ function startExploration() {
       applyEvent(ev.ev, false, { preview: true });
     } else if (ev.type === 'explore-result') {
       run.exploreResults.push(ev);
-      const Rg = reflectance(ev.layers.map((L) => ({ n: L.n, d: L.d })), view.displayGrid, model());
-      run.ghosts[ev.index] = { wl: view.displayGrid, R: Rg, name: ev.name, F: ev.score, layers: ev.layers.length, design: ev.layers, best: false };
+      const gl = ev.layers.map((L) => ({ n: L.n, d: L.d }));
+      const gsp = dual() ? spectra(gl, view.displayGrid, model()) : null;
+      const Rg = gsp ? gsp.Rs : reflectance(gl, view.displayGrid, model());
+      run.ghosts[ev.index] = { wl: view.displayGrid, R: Rg, R2: gsp ? gsp.Rp : null, name: ev.name, F: ev.score, layers: ev.layers.length, design: ev.layers, best: false };
       let bi = -1; run.ghosts.forEach((g, i) => { if (g && (bi < 0 || g.F < run.ghosts[bi].F)) bi = i; }); run.ghosts.forEach((g, i) => { if (g) g.best = i === bi; });
       spectrum.set({ ghosts: run.ghosts.filter(Boolean).map((g) => g) });
       const li = $(`explore-${ev.index}`);
@@ -786,11 +821,11 @@ function animate(dt, snap) {
 function exportExcel() {
   const res = run.lastResult; if (!res) return;
   const grid = res.grid ? res.grid.wavelengths : run.problem.grid, target = res.grid ? res.grid.target : run.problem.target, weights = res.grid ? res.grid.weights : run.problem.weights;
-  let md = 0; for (let i = 0; i < grid.length; i++) if (weights[i] > 0) md = Math.max(md, Math.abs(res.R[i] - target[i]));
+  const md = assess(res.layers, grid, target, weights, model()).maxDev;
   const sp = oblique() ? spectra(res.layers, grid, model()) : null;
   const bytes = resultWorkbook({
     settings: {
-      version: VERSION, substrate: substrate(), ambient: ambient(), angle: settings.angle, pol: settings.pol, polLabel: polarizationLabel(settings.pol), H: materialH(), L: materialL(), lambdaMin: settings.lambdaMin, lambdaMax: settings.lambdaMax, lambdaCenter: lambdaCenter(), points: settings.points, bands: settings.bands,
+      version: VERSION, substrate: substrate(), ambient: ambient(), angle: settings.angle, pol: settings.pol, polLabel: polarizationLabel(settings.pol), dual: dual(), H: materialH(), L: materialL(), lambdaMin: settings.lambdaMin, lambdaMax: settings.lambdaMax, lambdaCenter: lambdaCenter(), points: settings.points, bands: settings.bands, bands2: dual() ? settings.bands2 : null,
       transition: settings.transition, startMaterial: startMat(), startThickness: settings.startThickness, startMode: settings.startMode, startName: run.startName, maxLayers: settings.maxLayers, maxTOT: settings.maxTOT, targetMerit: settings.targetMerit, thinLayer: settings.thinLayer,
       candidates: settings.candidates, denseCheck: settings.denseCheck, enrichGrid: settings.enrichGrid,
     },

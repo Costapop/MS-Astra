@@ -31,7 +31,8 @@ import {
   mergeEqualNeighbours, totalOpticalThickness,
 } from './optics.js';
 import { refine, refineToEnd } from './refine.js';
-import { sampleTarget, denseGrid } from './config.js';
+import { sampleTarget, sampleDualTarget, denseGrid, denseGridDual } from './config.js';
+import { polTarget } from './optics.js';
 
 function copy(layers) { return layers.map((L) => ({ ...L, inserted: false })); }
 
@@ -85,7 +86,7 @@ export function* synthesize(cfg) {
   const { ns, na = 1, materials } = cfg;
   // optical model: substrate, incident medium, angle of incidence and the target characteristic (Rs, Rp, both, unpolarized mean)
   const model = opticsModel({ ns, na, angle: cfg.angle ?? 0, pol: cfg.pol ?? 'avg' });
-  const problem = { wavelengths: Float64Array.from(cfg.wavelengths), target: Float64Array.from(cfg.target), weights: Float64Array.from(cfg.weights), ns, na, model };
+  const problem = { wavelengths: Float64Array.from(cfg.wavelengths), target: cloneTarget(cfg.target), weights: cloneTarget(cfg.weights), ns, na, model };
   const H = materials.H, Lm = materials.L;
   const other = (lay) => (lay.m === H.m ? Lm.n : H.n);
   const matByIndex = (n) => (n === H.n ? H : Lm);
@@ -107,6 +108,7 @@ export function* synthesize(cfg) {
 
   // independent dense check and grid enrichment
   const bands = cfg.bands || null;
+  const bands2 = model.separate ? (cfg.bands2 || bands) : null;   // «Rs & Rp»: the Rp target has its own bands
   const transition = cfg.transition ?? 0;
   const denseOn = !!(cfg.dense?.enabled ?? bands);
   const enrichOn = denseOn && (cfg.enrich?.enabled ?? true);
@@ -116,7 +118,7 @@ export function* synthesize(cfg) {
   // grid cannot resolve an ideal edge better than its spacing); a wider user transition zone wins.
   const gridStep = (lamMax - lamMin) / Math.max(1, problem.wavelengths.length - 1);
   const denseTransition = Math.max(transition, 2 * gridStep);
-  const dense = denseOn ? denseGrid(bands, lamMin, lamMax, denseTransition, cfg.dense?.points) : null;
+  const dense = denseOn ? (bands2 ? denseGridDual(bands, bands2, lamMin, lamMax, denseTransition, cfg.dense?.points) : denseGrid(bands, lamMin, lamMax, denseTransition, cfg.dense?.points)) : null;
   const denseCheck = (ls) => {
     if (!dense) return null;
     const a = assess(ls, dense.wavelengths, dense.target, dense.weights, model);
@@ -175,11 +177,11 @@ export function* synthesize(cfg) {
       yield { type: 'dense', F: dc.F, maxDev: dc.maxDev, Fgrid: F, points: dense.wavelengths.length };
       const underResolved = dc.F > 1.25 * F + 1e-14 || (F <= targetF && dc.F > targetF);
       if (underResolved && enrichOn && problem.wavelengths.length < enrichCap) {
-        const added = enrichGrid(problem, dense, dc.R, bands, transition, Math.min(enrichPerCycle, enrichCap - problem.wavelengths.length));
+        const added = enrichGrid(problem, dense, dc, bands, transition, Math.min(enrichPerCycle, enrichCap - problem.wavelengths.length), bands2);
         if (added.length) {
           stats.enrichments++; stats.pointsAdded += added.length;
           F = evalF(layers);
-          yield { type: 'grid', wavelengths: Float64Array.from(problem.wavelengths), target: Float64Array.from(problem.target), weights: Float64Array.from(problem.weights), added, layers: copy(layers), R: evalR(layers), F };
+          yield { type: 'grid', wavelengths: Float64Array.from(problem.wavelengths), target: cloneTarget(problem.target), weights: cloneTarget(problem.weights), added, layers: copy(layers), R: evalR(layers), F };
           const rg = yield* doRefine(layers, 'Refinement on the enriched grid');
           layers = dropZeroLayers(rg.layers, startMat); F = rg.F; best = null; keepBest(layers, F);
           dc = denseCheck(layers);
@@ -485,7 +487,7 @@ export function* synthesize(cfg) {
   }
   const done = {
     type: 'done', layers: copy(layers), R: Rf, F: Ff, reason, stop, stats, opticalThickness: finalTOT,
-    grid: { wavelengths: Float64Array.from(problem.wavelengths), target: Float64Array.from(problem.target), weights: Float64Array.from(problem.weights) },
+    grid: { wavelengths: Float64Array.from(problem.wavelengths), target: cloneTarget(problem.target), weights: cloneTarget(problem.weights) },
     dense: dcf ? { wavelengths: dense.wavelengths, target: dense.target, weights: dense.weights, R: dcf.R, Rs: dcf.Rs, Rp: dcf.Rp, F: dcf.F, maxDev: dcf.maxDev } : null,
     start: cfg.start, elapsedMs: Date.now() - t0,
   };
@@ -493,17 +495,30 @@ export function* synthesize(cfg) {
   return done;
 }
 
+function cloneTarget(t) { return t && !t.length ? { s: Float64Array.from(t.s), p: Float64Array.from(t.p) } : Float64Array.from(t); }
+
 /**
  * Add the worst‑resolved dense‑grid points to the optimization grid
  * (doc A.3, ENRICH_GRID). A candidate must lie at least a quarter of the local
  * grid spacing away from existing points. Returns the added wavelengths.
+ * `dc` is the dense check ({R} or {Rs, Rp} for separate Rs/Rp targets); with
+ * `bands2` the Rp target has its own bands and the error is the larger of the two.
  */
-export function enrichGrid(problem, dense, Rdense, bands, transition, count) {
+export function enrichGrid(problem, dense, dc, bands, transition, count, bands2 = null) {
   const wl = Array.from(problem.wavelengths);
   const errs = [];
+  const Rdense = dc.length ? dc : dc.R;
+  const dual = !!bands2 && dc.Rs && dc.Rp;
+  const ts = polTarget(dense.target, 's'), tp = polTarget(dense.target, 'p'), ws = polTarget(dense.weights, 's'), wp = polTarget(dense.weights, 'p');
   for (let i = 0; i < dense.wavelengths.length; i++) {
-    if (dense.weights[i] <= 0) continue;
-    errs.push({ w: dense.wavelengths[i], e: Math.abs(Rdense[i] - dense.target[i]) });
+    if (dual) {
+      const es = ws[i] > 0 ? Math.abs(dc.Rs[i] - ts[i]) : 0, ep = wp[i] > 0 ? Math.abs(dc.Rp[i] - tp[i]) : 0;
+      if (ws[i] <= 0 && wp[i] <= 0) continue;
+      errs.push({ w: dense.wavelengths[i], e: Math.max(es, ep) });
+      continue;
+    }
+    if (ws[i] <= 0) continue;
+    errs.push({ w: dense.wavelengths[i], e: Math.abs(Rdense[i] - ts[i]) });
   }
   errs.sort((a, b) => b.e - a.e);
   const added = [];
@@ -517,7 +532,7 @@ export function enrichGrid(problem, dense, Rdense, bands, transition, count) {
   }
   if (!added.length) return added;
   const merged = wl.concat(added).sort((a, b) => a - b);
-  const s = sampleTarget(bands, merged, transition);
+  const s = bands2 ? sampleDualTarget(bands, bands2, merged, transition) : sampleTarget(bands, merged, transition);
   problem.wavelengths = Float64Array.from(merged); problem.target = s.target; problem.weights = s.weights;
   return added;
 }

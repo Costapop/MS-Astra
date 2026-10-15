@@ -79,16 +79,24 @@ The target bands apply to one of (book 1.1.24–1.1.25; spec 3.4):
 |---|---|---|
 | `Rs` | `Σ ν_l (Rs_l − R̃_l)²` | s‑polarized light |
 | `Rp` | `Σ ν_l (Rp_l − R̃_l)²` | p‑polarized light |
-| `Rs & Rp` | `½ Σ ν_l [(Rs_l − R̃_l)² + (Rp_l − R̃_l)²]` | both polarizations to the same target (polarization‑insensitive design) |
+| `Rs & Rp` | `½ [Σ ν_s,l (Rs_l − R̃s_l)² + Σ ν_p,l (Rp_l − R̃p_l)²]` | the two polarizations, each to **its own target** `R̃s`, `R̃p` (polarizer, polarization‑insensitive splitter, …) |
 | `(Rs + Rp)/2` | `Σ ν_l (R̄_l − R̃_l)²`, `R̄ = (Rs + Rp)/2` | unpolarized light |
 
-For `Rs & Rp` the least‑squares problem has `2L` residual rows (one per
-wavelength and polarization, each with weight `ν_l/2`); for the unpolarized
+For `Rs & Rp` the Rs target and the Rp target are two independent
+piecewise‑constant band sets on the shared spectral range, each sampled on
+the same grid with its own transition zones and its own weights normalised
+to one, so `F = ½(F_s + F_p)`; the least‑squares problem has `2L` residual
+rows (one per wavelength and polarization, each `√(ν_P,l/2)(R_P,l − R̃_P,l)`).
+The dense verification grid carries both sides of every jump of either
+target, the enrichment takes the larger of the two errors at a dense point,
+and the needle derivative sums the adjoint functions of the two
+polarizations, each built from its own residual (§4). For the unpolarized
 mean the residual is formed from the physical quantity `R̄` first and
 differentiated afterwards (`δR̄ = ½(δRs + δRp)`), as the specification
 requires. The chart draws the characteristic as the main curve and the
-polarizations as thin lines; the dense‑grid check, the needle derivative and
-the export use the same definition.
+polarizations as thin lines (in the `Rs & Rp` mode both targets — Rp dashed —
+and both spectra are drawn and edited); the dense‑grid check and the export
+use the same definitions.
 
 ## 3. Merit function
 
@@ -126,8 +134,9 @@ recursion (5.3):
 ```
 
 where `e_l` is the residual of the characteristic (`R_P − R̃` for a single
-polarization and for `Rs & Rp`, `R̄ − R̃` for the unpolarized mean) and
-`w_P = 1` for a single polarization, `½` when both enter. Inside a layer
+polarization, `R_P − R̃_P` with the polarization's own target and weights
+`ν_P,l` for `Rs & Rp`, `R̄ − R̃` for the unpolarized mean) and `w_P = 1` for a
+single polarization, `½` when both enter. Inside a layer
 (5.4, 6.12): `Ψ(z_{j−1}+x) = Ψ_j [c_j(x)/c_j(d_j)]²`. The product `Ψ·δA` is
 constant above a perturbation (4.11, 6.14), which yields:
 
@@ -154,7 +163,8 @@ constant above a perturbation (4.11, 6.14), which yields:
 All derivatives are analytic. `tests/optics.test.js` checks the gradient,
 the Jacobian and the weighted residual rows against central finite
 differences at normal incidence (relative error < 1e‑8) and at 30–72° from
-air and BK7 for `Rs`, `Rp`, `Rs & Rp` and the unpolarized mean (< 1e‑7), and
+air and BK7 for `Rs`, `Rp`, `Rs & Rp` (shared and separate targets with
+different weights) and the unpolarized mean (< 1e‑7), and
 the needle derivative against the finite‑width merit change (η = 0.001 nm at
 normal incidence, 0.0005 nm at oblique incidence, including an evanescent
 host layer).

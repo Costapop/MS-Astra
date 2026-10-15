@@ -21,8 +21,11 @@
  * A' = i k (b_j − a_j A²):  a = 1, b = n² − α² (s);  a = 1 − α²/n², b = n² (p).
  * At normal incidence both polarizations coincide with the book's n_j, n².
  *
- * Target characteristics: Rs, Rp, both (Rs and Rp each to the target) or the
- * unpolarized reflectance (Rs + Rp)/2 (book eq. 1.1.25; spec eq. 3.4).
+ * Target characteristics: Rs, Rp, both (Rs and Rp each to its own target
+ * R̃s, R̃p: F = ½[Σ ν_s (Rs − R̃s)² + Σ ν_p (Rp − R̃p)²]) or the unpolarized
+ * reflectance (Rs + Rp)/2 (book eq. 1.1.25; spec eq. 3.4). A target (and its
+ * weights) is either one Float64Array shared by the polarizations or an
+ * object { s, p } with one array per polarization.
  *
  * Layer order: j = 1 is adjacent to the substrate, j = N faces the ambient.
  * Every layer is { n: refractiveIndex, d: geometricThickness, m: materialKey }.
@@ -50,6 +53,10 @@ export const POLARIZATIONS = [
   { key: 'avg', label: '(Rs + Rp)/2', title: 'unpolarized light: the mean reflectance (Rs + Rp)/2 is driven to the target' },
 ];
 export function polarizationLabel(key) { return (POLARIZATIONS.find((p) => p.key === key) || POLARIZATIONS[3]).label; }
+
+/** The target (or weight) array of polarization `key`: a plain array is shared, an object {s, p} is per polarization. */
+export function polTarget(t, key) { return t && !t.length && typeof t === 'object' ? (t[key] ?? t.s ?? t.p) : t; }
+export const isDualTarget = (t) => !!t && !t.length && typeof t === 'object' && 's' in t && 'p' in t;
 
 /**
  * Build the optical model. `pol` is 's', 'p', 'both' or 'avg' (unpolarized).
@@ -214,16 +221,19 @@ export function assess(layers, wavelengths, target, weights, model, na) {
   const sp = spectra(layers, wavelengths, M);
   let F = 0, maxDev = 0;
   if (M.separate) {
+    const ts = polTarget(target, 's'), tp = polTarget(target, 'p'), ws = polTarget(weights, 's'), wp = polTarget(weights, 'p');
     for (let l = 0; l < wavelengths.length; l++) {
-      const es = sp.Rs[l] - target[l], ep = sp.Rp[l] - target[l];
-      F += 0.5 * weights[l] * (es * es + ep * ep);
-      if (weights[l] > 0) maxDev = Math.max(maxDev, Math.abs(es), Math.abs(ep));
+      const es = sp.Rs[l] - ts[l], ep = sp.Rp[l] - tp[l];
+      F += 0.5 * (ws[l] * es * es + wp[l] * ep * ep);
+      if (ws[l] > 0) maxDev = Math.max(maxDev, Math.abs(es));
+      if (wp[l] > 0) maxDev = Math.max(maxDev, Math.abs(ep));
     }
   } else {
+    const t = polTarget(target, M.pols[0].key), w = polTarget(weights, M.pols[0].key);
     for (let l = 0; l < wavelengths.length; l++) {
-      const e = sp.R[l] - target[l];
-      F += weights[l] * e * e;
-      if (weights[l] > 0) maxDev = Math.max(maxDev, Math.abs(e));
+      const e = sp.R[l] - t[l];
+      F += w[l] * e * e;
+      if (w[l] > 0) maxDev = Math.max(maxDev, Math.abs(e));
     }
   }
   return { R: sp.R, Rs: sp.Rs, Rp: sp.Rp, F, maxDev };
@@ -231,7 +241,7 @@ export function assess(layers, wavelengths, target, weights, model, na) {
 
 export function meritOf(layers, wavelengths, target, weights, model, na) {
   const M = asModel(model, na);
-  if (!M.separate) return merit(reflectance(layers, wavelengths, M), target, weights);
+  if (!M.separate) return merit(reflectance(layers, wavelengths, M), polTarget(target, M.pols[0].key), polTarget(weights, M.pols[0].key));
   return assess(layers, wavelengths, target, weights, M).F;
 }
 
@@ -275,8 +285,9 @@ export function evaluate(layers, wavelengths, target, weights, model, naOrAdjoin
   else wantAdjoint = !!wantAdjointLegacy;
   const M = asModel(model, typeof naOrAdjoint === 'number' ? naOrAdjoint : 1);
   const N = layers.length, L = wavelengths.length;
-  const pols = M.pols.map((p) => ({ key: p.key, w: p.w, tab: layerTable(layers, M, p.key) }));
+  const pols = M.pols.map((p) => ({ key: p.key, w: p.w, tab: layerTable(layers, M, p.key), target: polTarget(target, p.key), weights: polTarget(weights, p.key) }));
   const separate = M.separate;
+  const target0 = pols[0].target, weights0 = pols[0].weights;   // the shared target of a single characteristic
   const rows = separate ? 2 * L : L;
   const st = makeState(N);
   const R = new Float64Array(L);
@@ -352,13 +363,13 @@ export function evaluate(layers, wavelengths, target, weights, model, naOrAdjoin
       }
     }
     // characteristic, errors, merit
-    const nu = weights[l];
     let Rchar;
     if (pols.length === 1) Rchar = RP[0];
     else Rchar = 0.5 * (RP[0] + RP[1]);
     R[l] = Rchar;
     for (let pi = 0; pi < pols.length; pi++) { if (pols[pi].key === 's') Rs[l] = RP[pi]; else Rp[l] = RP[pi]; }
-    const eChar = Rchar - target[l];
+    const nu = weights0[l];
+    const eChar = Rchar - target0[l];
     const sq = Math.sqrt(nu);
     if (!separate) {
       F += nu * eChar * eChar;
@@ -369,16 +380,18 @@ export function evaluate(layers, wavelengths, target, weights, model, naOrAdjoin
         grad[j] += 2 * nu * eChar * s;
       }
     } else {
-      const sq2 = Math.sqrt(nu * 0.5);
+      // each polarization has its own target R̃_P and weights ν_P:  F = ½ Σ_P Σ_l ν_P,l (R_P,l − R̃_P,l)²
       for (let pi = 0; pi < pols.length; pi++) {
-        const e = RP[pi] - target[l];
-        F += 0.5 * nu * e * e;
+        const nuP = pols[pi].weights[l];
+        const e = RP[pi] - pols[pi].target[l];
+        const sq2 = Math.sqrt(nuP * 0.5);
+        F += 0.5 * nuP * e * e;
         resid[pi * L + l] = sq2 * e;
         for (let j = 0; j < N; j++) {
           const d = dRall[pi * N + j];
           Jw[(pi * L + l) * N + j] = sq2 * d;
           J[l * N + j] += 0.5 * d;
-          grad[j] += nu * e * d;
+          grad[j] += nuP * e * d;
         }
       }
     }
@@ -387,9 +400,10 @@ export function evaluate(layers, wavelengths, target, weights, model, naOrAdjoin
       const o1 = l * (N + 1);
       for (let pi = 0; pi < pols.length; pi++) {
         const A = adjoint.pols[pi];
-        const e = separate ? RP[pi] - target[l] : eChar;
+        const e = separate ? RP[pi] - pols[pi].target[l] : eChar;
+        const nuP = separate ? pols[pi].weights[l] : nu;
         // Ψ_j = (2 ν w e / q_a) W Φ_j   (spec eq. 6.5)
-        const psiScale = 2 * nu * pols[pi].w * e / pols[pi].tab.qa;
+        const psiScale = 2 * nuP * pols[pi].w * e / pols[pi].tab.qa;
         for (let j = 0; j <= N; j++) { A.Pre[o1 + j] *= psiScale; A.Pim[o1 + j] *= psiScale; }
       }
     }

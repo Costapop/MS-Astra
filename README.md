@@ -14,9 +14,10 @@ dependencies, accounts or backend.
 
 A plane wave from air or BK7 at any angle of incidence from 0 to 89.9° onto
 isotropic, homogeneous, lossless, non‑dispersive layers on a semi‑infinite
-substrate; the target applies to `Rs`, `Rp`, both at once or the unpolarized
-reflectance `(Rs + Rp)/2` (s and p are handled with the Furman–Tikhonravov
-polarization admittances, evanescent layers included). The synthesis starts from a
+substrate; the target applies to `Rs`, `Rp`, to `Rs` and `Rp` jointly with a
+separate target for each polarization, or to the unpolarized reflectance
+`(Rs + Rp)/2` (s and p are handled with the Furman–Tikhonravov polarization
+admittances, evanescent layers included). The synthesis starts from a
 single layer (or from a set of starting designs explored in the background),
 refines all thicknesses with a constrained Levenberg–Marquardt method using
 the analytic Jacobian, computes the needle derivative `g(z)` analytically
@@ -41,11 +42,13 @@ evidence: [docs/VERIFICATION.md](docs/VERIFICATION.md).
    values numerically together with the spectral range, the number of points
    and the transition zone around target jumps (points inside it get zero
    weight). The **angle of incidence** (0–89.9°) and the **target
-   characteristic** — `Rs`, `Rp`, `Rs & Rp` (both to the same target) or
-   `(Rs + Rp)/2` (unpolarized light) — are set in the header of the same
-   card and on its *Target* tab; the target bands are drawn and typed the
-   same way at any angle. At an oblique angle the chart adds thin lines for
-   `Rs` (solid) and `Rp` (dashed) and the tooltip shows both.
+   characteristic** — `Rs`, `Rp`, `Rs & Rp` (a separate target for each
+   polarization: the Rp target is the dashed line on the chart and the
+   second table on the tab) or `(Rs + Rp)/2` (unpolarized light) — are set
+   in the header of the same card and on its *Target* tab; the target bands
+   are drawn and typed the same way at any angle. At an oblique angle the
+   chart adds thin lines for `Rs` (solid) and `Rp` (dashed) and the tooltip
+   shows both.
 2. In the sidebar set the H and L materials, the substrate, the **incident
    medium** the light comes from (air or BK7 — e.g. a cemented cube, with the
    angle measured inside it), the starting
@@ -77,8 +80,9 @@ Ta₂O₅ 2.10, TiO₂ 2.45, ZnS 2.35, a‑Si 3.95, K8 1.52, fused quartz 1.46,
 Sitall 1.54. Substrate: BK7 1.52. Incident medium: air 1.00 or BK7 1.52.
 Wavelengths and thicknesses in nm. Layer 1 is adjacent to the substrate
 everywhere in the application and in the export. Presets *Cube splitter 45°*
-(unpolarized 50 % inside BK7) and *AR at 45°* (both polarizations) show the
-oblique‑incidence mode.
+(unpolarized 50 % inside BK7), *AR at 45°* (both polarizations) and
+*Polarizer 45°* (Rs → 98 %, Rp → 0 inside BK7) show the oblique‑incidence
+modes.
 
 ## Run locally
 
