@@ -66,6 +66,34 @@ test('result workbook carries the termination summary, the design selection and 
   assert.match(s4, /Decisive cause.*Target merit reached/);
 });
 
+/* ---------------- v2.6.0: an explored start chosen from the ranking is the design of the workbook ---------------- */
+test('result workbook names a chosen explored start in the summary and marks it in the Starts sheet', () => {
+  const wl = [400, 500, 600], target = [0, 0, 0], R = [0.001, 0.002, 0.0015];
+  const layers = [{ m: 'TiO2', n: 2.45, d: 14.9 }, { m: 'MgF2', n: 1.38, d: 28.1 }];
+  const starts = [
+    { index: 0, name: 'manual', F: 3e-6, Fdense: 4e-6, score: 4e-6, layers, opticalThickness: 75, reason: 'Layer limit', summary: { headline: 'Layer limit reached' }, elapsedMs: 1200 },
+    { index: 1, name: 'winner', F: 2e-6, Fdense: 2.5e-6, score: 2.5e-6, layers, opticalThickness: 75, reason: 'Target merit reached (F = 2e-6)', summary: { headline: 'Target merit reached' }, elapsedMs: 800 },
+  ];
+  const settings = { version: '2.6.0', substrate: { label: 'BK7', n: 1.52 }, H: { key: 'TiO2', n: 2.45 }, L: { key: 'MgF2', n: 1.38 }, lambdaMin: 400, lambdaMax: 600, lambdaCenter: 500, points: 3, bands: [{ from: 400, to: 600, R: 0 }], startMode: 'multi', startMaterial: { key: 'TiO2' }, startThickness: 100, maxLayers: 12, maxTOT: 1500, targetMerit: 1e-6, thinLayer: 1 };
+  const result = { F: 3e-6, maxDev: 0.002, reason: 'Layer limit', stats: {}, selection: 'Chosen by you from the 2 explored starting designs: «manual», rank 2 of 2.' };
+  // the chosen start (rank 2) is the design of the workbook
+  const chosen = readZip(resultWorkbook({ settings: { ...settings, startName: 'manual', startRole: 'chosen' }, wavelengths: wl, target, R, layers, result, starts, exported: { index: 0, how: 'explored' } }));
+  assert.match(chosen['xl/worksheets/sheet3.xml'], /Starting design.*Multi‑start; chosen from the explored starts \(see the Starts sheet\): manual/);
+  assert.match(chosen['xl/worksheets/sheet3.xml'], /Design selection.*Chosen by you.*rank 2 of 2/);
+  const s4 = chosen['xl/worksheets/sheet4.xml'];
+  assert.match(s4, /Note/);
+  assert.match(s4, /shown on the dashboard — the design of this workbook \(explored result\)/);
+  const w = s4.indexOf('>winner<'), m = s4.indexOf('>manual<'), shownNote = s4.indexOf('shown on the dashboard');
+  assert.ok(w > 0 && m > w && shownNote > m, 'the winner is ranked first; the note of the chosen start follows its own row');
+  assert.doesNotMatch(s4, /replayed on the dashboard/);
+  // the winner replayed: the usual summary, the winner's row marked as replayed and exported
+  const replay = readZip(resultWorkbook({ settings: { ...settings, startName: 'winner', startRole: 'winner' }, wavelengths: wl, target, R, layers, result: { ...result, selection: 'Chosen as the best of 2 explored starting designs' }, starts, exported: { index: 1, how: 'replay' } }));
+  assert.match(replay['xl/worksheets/sheet3.xml'], /Starting design.*Multi‑start; best: winner/);
+  const r4 = replay['xl/worksheets/sheet4.xml'];
+  assert.match(r4, /winner; replayed on the dashboard — the design of this workbook/);
+  assert.doesNotMatch(r4, /shown on the dashboard/);
+});
+
 /* ---------------- v2.3: oblique incidence in the export ---------------- */
 test('result workbook records the angle, the incident medium and the target characteristic and adds Rs/Rp columns at oblique incidence', () => {
   const wl = [450, 550, 650], target = [0.5, 0.5, 0.5], R = [0.49, 0.5, 0.51], Rs = [0.9, 0.92, 0.91], Rp = [0.08, 0.08, 0.11];

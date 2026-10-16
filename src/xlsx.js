@@ -108,7 +108,7 @@ export function buildWorkbook(sheets) {
 
 /** Build the MS Astra result workbook. */
 const polT = (t, key) => (t && !t.length ? t[key] : t);
-export function resultWorkbook({ settings, wavelengths, target, weights, R, Rs = null, Rp = null, layers, result, starts = [] }) {
+export function resultWorkbook({ settings, wavelengths, target, weights, R, Rs = null, Rp = null, layers, result, starts = [], exported = null }) {
   const oblique = (settings.angle ?? 0) > 0;
   const dual = oblique && settings.pol === 'both' && target && !target.length && Rs && Rp;   // separate Rs and Rp targets
   const charName = oblique ? (settings.pol === 'both' ? '(Rs+Rp)/2' : settings.polLabel || 'R') : 'R';
@@ -174,7 +174,7 @@ export function resultWorkbook({ settings, wavelengths, target, weights, R, Rs =
       ['Target bands', settings.dual && settings.bands2
         ? `Rs: ${settings.bands.map((b) => `${b.from.toFixed(1)}–${b.to.toFixed(1)} nm ${(100 * b.R).toFixed(2)} %`).join('; ')} | Rp: ${settings.bands2.map((b) => `${b.from.toFixed(1)}–${b.to.toFixed(1)} nm ${(100 * b.R).toFixed(2)} %`).join('; ')}`
         : settings.bands.map((b) => `${b.from.toFixed(1)}–${b.to.toFixed(1)} nm: R = ${(100 * b.R).toFixed(2)} %`).join('; ')],
-      ['Starting design', settings.startMode === 'multi' ? `Multi‑start; best: ${settings.startName || '—'}` : `${settings.startMaterial.key}, ${settings.startThickness} nm`],
+      ['Starting design', settings.startMode === 'multi' ? `Multi‑start; ${settings.startRole === 'chosen' ? 'chosen from the explored starts (see the Starts sheet)' : 'best'}: ${settings.startName || '—'}` : `${settings.startMaterial.key}, ${settings.startThickness} nm`],
       ['Transition zone at target jumps, nm', settings.transition ?? 0],
       ['Needle candidates compared per step', settings.candidates === 0 ? 'all' : settings.candidates],
       ['Dense‑grid check / grid enrichment', `${settings.denseCheck ? 'on' : 'off'} / ${settings.denseCheck && settings.enrichGrid ? 'on' : 'off'}`],
@@ -239,13 +239,20 @@ export function resultWorkbook({ settings, wavelengths, target, weights, R, Rs =
     });
   }
   if (starts && starts.length) {
+    // the note names the winner and the start whose design this workbook describes (the winner through its replay, or an explored result chosen in the interface)
+    const note = (r, rank) => {
+      const parts = [];
+      if (rank === 1) parts.push('winner');
+      if (exported && r.index === exported.index) parts.push(exported.how === 'replay' ? 'replayed on the dashboard — the design of this workbook' : 'shown on the dashboard — the design of this workbook (explored result)');
+      return parts.join('; ');
+    };
     sheets.push({
-      name: 'Starts', title: 'Multi‑start exploration — ranked by the score max(F, F_dense); the lowest score wins and is replayed',
+      name: 'Starts', title: 'Multi‑start exploration — ranked by the score max(F, F_dense); the lowest score wins and is replayed; any explored result can be shown and exported instead',
       columns: [
         { title: 'Rank', width: 6 }, { title: 'Starting design', width: 40 }, { title: 'Score max(F, F_dense)', width: 20, style: 5 }, { title: 'Merit F', width: 14, style: 5 }, { title: 'Dense‑grid F', width: 14, style: 5 },
-        { title: 'Layers', width: 8 }, { title: 'Optical thickness, nm', width: 20, style: 3 }, { title: 'Decisive cause', width: 36 }, { title: 'Termination', width: 44 }, { title: 'Time, s', width: 9, style: 3 },
+        { title: 'Layers', width: 8 }, { title: 'Optical thickness, nm', width: 20, style: 3 }, { title: 'Decisive cause', width: 36 }, { title: 'Termination', width: 44 }, { title: 'Time, s', width: 9, style: 3 }, { title: 'Note', width: 40 },
       ],
-      rows: starts.slice().sort((a, b) => a.score - b.score).map((r, i) => [i + 1, r.name, r.score, r.F, r.Fdense ?? 'not checked', r.layers.length, r.opticalThickness, r.summary ? r.summary.headline : '', r.reason, r.elapsedMs / 1000]),
+      rows: starts.slice().sort((a, b) => a.score - b.score).map((r, i) => [i + 1, r.name, r.score, r.F, r.Fdense ?? 'not checked', r.layers.length, r.opticalThickness, r.summary ? r.summary.headline : '', r.reason, r.elapsedMs / 1000, note(r, i + 1)]),
     });
   }
   return buildWorkbook(sheets);

@@ -9,7 +9,7 @@ import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
 
-export const VERSION = '2.5.1';
+export const VERSION = '2.6.0';
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------------ */
@@ -310,6 +310,7 @@ const run = {
   dense: null, startName: null, exploreResults: [], exploreRanked: null, cfg: null,
   ghosts: [], logExpanded: false, exploreLabel: null,
   starts: [], exploreIndex: null,   // multi‑start: { history, name, running, best, done } per starting design; the start being explored
+  shownStart: null,                 // multi‑start: the index of an explored start whose result the user chose to show (null: the winner's replay)
   timer: { running: false, startedAt: 0, accum: 0 },
 };
 const LOG_TAIL = 5;
@@ -324,7 +325,7 @@ function toDisplayLayers(layers) {
 function setInitialDesign() {
   const { grid, target, weights } = buildProblem();
   run.problem = { grid, target, weights };
-  run.added = new Set(); run.dense = null; run.startName = null; run.exploreResults = []; run.exploreRanked = null;
+  run.added = new Set(); run.dense = null; run.startName = null; run.exploreResults = []; run.exploreRanked = null; run.shownStart = null;
   const sm = startMat();
   const layers = [{ n: sm.n, m: sm.key, d: settings.startThickness }];
   const R = reflectance(layers, grid, model());
@@ -413,12 +414,15 @@ function updateCurve(force) {
 function startLabel(html, multi) { $('start-label').innerHTML = `<span class="badge${multi ? ' multi' : ''}" title="${multi ? 'Multi‑start: the starting design shown on the dashboard' : 'The single starting layer'}">${multi ? 'Multi‑start' : 'Single layer'}</span><span title="${html.replace(/"/g, '”')}">${html}</span>`; }
 
 /* ---- Multi‑start card: the starting designs and their status; a merit history per start on the history chart ---- */
+const LIST_HINT = 'Hover a start to see its spectrum, structure and merit history on the charts';
+const LIST_HINT_DONE = 'Hover a start to compare it on the charts; click a finished start to show its result on the dashboard — it becomes the current design for the Layer table and Export Excel';
 function renderStartsList(names) {
-  const ol = $('explore-list'); ol.innerHTML = '';
+  const ol = $('explore-list'); ol.innerHTML = ''; ol.classList.remove('selectable'); ol.title = LIST_HINT;
   names.forEach((name, i) => {
     const li = document.createElement('li'); li.id = `explore-${i}`; li.className = 'pending';
     li.innerHTML = `<span class="n">${i + 1}. ${name}</span><span class="f">—</span><span class="l"></span>`;
     li.addEventListener('mouseenter', () => highlightGhost(i)); li.addEventListener('mouseleave', () => highlightGhost(null));
+    li.addEventListener('click', () => { if (run.exploreRanked) showExploredStart(i); });
     ol.appendChild(li);
   });
 }
@@ -431,7 +435,67 @@ function resetMultiCard() {
   try { names = startDesigns(engineConfig(), lambdaCenter()).map((s) => s.name); } catch { names = []; }
   renderStartsList(names);
   $('multi-label').textContent = `${names.length} starting designs · up to ${settings.exploreBudget} s each`;
-  $('multi-label').title = 'Every start is synthesized in the background with the same limits; the best by max(F, F_dense) is replayed on the dashboard';
+  $('multi-label').title = 'Every start is synthesized in the background with the same limits; the best by max(F, F_dense) is replayed on the dashboard; any finished start can be shown instead by clicking it';
+}
+/** After the exploration every finished start in the list can be clicked to show its result on the dashboard. */
+function enableStartSelection() {
+  const ol = $('explore-list'); ol.classList.add('selectable'); ol.title = LIST_HINT_DONE;
+  for (const r of run.exploreResults) { const li = $(`explore-${r.index}`); if (li) li.title = `Show this result on the dashboard: ${r.layers.length} layers, F = ${fmt.sci(r.F)} — ${r.summary ? r.summary.headline : r.reason}`; }
+  markShownStart();
+}
+/** Marks the start whose result is on the dashboard (null: the winner's replay) in the list and the card label. */
+function markShownStart() {
+  const ranked = run.exploreRanked || [];
+  for (const li of $('explore-list').children) li.classList.toggle('shown', run.shownStart != null && li.id === `explore-${run.shownStart}`);
+  if (!ranked.length) return;
+  const n = ranked.length, best = ranked[0];
+  if (run.shownStart == null) $('multi-label').textContent = `${n} explored · ★ the winner is replayed`;
+  else {
+    const rank = ranked.findIndex((r) => r.index === run.shownStart) + 1;
+    $('multi-label').textContent = rank === 1 ? `★ the winner is shown · ${n} explored` : `▸ rank ${rank} of ${n} is shown`;
+    const li = $(`explore-${run.shownStart}`); if (li) li.scrollIntoView({ block: 'nearest' });
+  }
+  $('multi-label').title = run.shownStart == null ? `The winner «${best.name}» is replayed on the dashboard; click any finished start to show its result instead` : `The explored result of «${run.startName}» is on the dashboard (the Layer table and Export Excel describe it); click another start to switch, or ★ for the winner`;
+  $('merit-legend-current').textContent = run.shownStart == null ? 'Replay' : 'Shown';
+}
+const exploredResult = (index) => run.exploreResults.find((r) => r.index === index) || null;
+/** Stops the replay of the winner (a chosen result replaces it on the dashboard). */
+function stopReplay(note) {
+  if (!run.gen || run.finished) return;
+  run.gen = null; run.running = false; run.paused = false; run.stepTo = null; run.finished = true;
+  timerPause(); timerDraw();
+  $('btn-run').textContent = 'Start synthesis'; $('btn-run').disabled = false; $('btn-step').disabled = true;
+  unlockSidebar();
+  logEntry('note', note);
+}
+/**
+ * Shows the result of an explored starting design on the dashboard as the current design: its reported
+ * coating on the spectrum, the structure and the layer table, its grid and dense check, its final needle
+ * scan, its merit history, the tiles and the verdict — and makes it the design that Export Excel writes.
+ * The result is the one the exploration reported for that start (nothing is recomputed).
+ */
+function showExploredStart(index) {
+  const r = exploredResult(index); if (!r || !r.done || !run.exploreRanked) return;
+  const ev = r.done, st = run.starts[index], ranked = run.exploreRanked, best = ranked[0];
+  const rank = ranked.findIndex((x) => x.index === index) + 1;
+  if (run.gen && !run.finished) stopReplay(`Replay of «${run.startName}» stopped: the explored result of «${r.name}» is shown instead.`);
+  if (run.shownStart === index) return;
+  run.shownStart = index; run.startName = r.name; run.gen = null;
+  run.cycle = ev.stats ? ev.stats.cycles : 0; run.dense = null;
+  run.F0 = st && st.history.length ? st.history[0].F : ev.F;   // the progress bar runs from that start's first merit
+  // that start's optimization grid (it may have enriched its own grid) replaces the one on the chart
+  const baseGrid = Array.from(buildProblem().grid);
+  run.added = new Set(Array.from(ev.grid.wavelengths).filter((w) => !baseGrid.some((b) => Math.abs(b - w) < 1e-6)));
+  spectrum.set({ grid: ev.grid.wavelengths, target: ev.grid.target, weights: ev.grid.weights, added: run.added, preview: false, ghostHighlight: null });
+  view.hideCurve = false; view.curveDirty = true;
+  // its merit history becomes the dashboard history (the final entry is added by the done event below)
+  run.history = st ? st.history.slice(0, -1) : []; meritChart.set({ history: run.history, highlight: null });
+  run.timer = { running: false, startedAt: 0, accum: ev.elapsedMs || 0 };
+  logEntry('explore', `Shown on the dashboard: «${r.name}» — rank ${rank} of ${ranked.length} by the score max(F, F<sub>dense</sub>) (${fmt.sci(r.score)})${rank === 1 ? ', the winner' : `; the winner is «${best.name}» (${fmt.sci(best.score)})`}. Its explored result is the current design: the Layer table and Export Excel describe it.`);
+  if (r.finalScan) applyEvent(r.finalScan, true);
+  else needle.set({ scan: null, candidate: null, insertion: null, annotations: null, banner: null, stale: false });
+  applyEvent(ev, false);
+  markShownStart();
 }
 function pushStartHistory(F, mark) {
   const st = run.exploreIndex != null ? run.starts[run.exploreIndex] : null; if (!st) return;
@@ -653,7 +717,17 @@ function buildVerdict(ev) {
   let selectionText, selectionHtml, replayMatch = null;
   const stats = ev.stats || {};
   const runText = `${plural(stats.cycles || 0, 'cycle')}: ${plural(stats.needles || 0, 'needle')} accepted of ${stats.compared || 0} refined alternatives, ${plural(stats.growths || 0, 'growth step')}, ${plural(stats.cleanups || 0, 'thin layer')} removed`;
-  if (multi) {
+  if (multi && run.shownStart != null) {
+    // an explored result chosen from the list: its rank, the winner for reference, and what is shown
+    const ranked = run.exploreRanked, best = ranked[0];
+    const rank = ranked.findIndex((x) => x.index === run.shownStart) + 1, r = ranked[rank - 1] || best;
+    const reachedN = ranked.filter((x) => x.score <= settings.targetMerit).length;
+    const criterion = settings.denseCheck ? 'the score max(F, F_dense)' : 'the merit F';
+    const winner = rank === 1 ? ' — the winner' : `; the winner is «${best.name}» ${fmt.sci(best.score)}`;
+    const reached = reachedN ? `${reachedN} of ${ranked.length} starts reached the target merit` : 'no start reached the target merit';
+    selectionText = `Chosen by you from the ${ranked.length} explored starting designs: «${r.name}», rank ${rank} of ${ranked.length} by ${criterion} (${fmt.sci(r.score)}${winner}); ${reached}. The result the exploration reported for this start is shown and exported; ${runText}.`;
+    selectionHtml = `Chosen by you from the ${ranked.length} explored starting designs: «${r.name}», rank ${rank} of ${ranked.length} by ${criterion.replace('F_dense', 'F<sub>dense</sub>')} (<b>${fmt.sci(r.score)}</b>${winner}); ${reached}. The result the exploration reported for this start is shown and exported — ${runText}.`;
+  } else if (multi) {
     const ranked = run.exploreRanked, best = ranked[0], runner = ranked[1];
     replayMatch = Math.abs(ev.F - best.F) <= 1e-9 * Math.max(1e-300, Math.abs(best.F)) && ev.layers.length === best.layers.length && ev.reason === best.reason;
     const ratio = runner ? runner.score / Math.max(best.score, 1e-300) : null;
@@ -760,9 +834,9 @@ function startExploration() {
       ev.results.forEach((r, rank) => { const li = $(`explore-${r.index}`); if (li) { li.classList.toggle('best', rank === 0); if (rank === 0) li.querySelector('.n').textContent = `★ ${r.name}`; } });
       const runner = ev.results[1];
       logEntry('explore', `Best starting design by the score max(F, F<sub>dense</sub>): «${best.name}» (score ${fmt.sci(best.score)}, ${best.layers.length} layers)${runner ? `; runner‑up «${runner.name}» ${fmt.sci(runner.score)}` : ''}. Replaying its evolution from the start.`);
-      run.startName = best.name; run.exploreRanked = ev.results;
+      run.startName = best.name; run.exploreRanked = ev.results; run.shownStart = null;
       startLabel(best.name, true);
-      $('multi-label').textContent = `${ev.results.length} explored · ★ the winner is replayed`;
+      enableStartSelection();
       $('btn-starts').hidden = false; run.exploreLabel = null; run.cycle = 0; run.exploreIndex = null;
       run.dense = null; run.history = []; meritChart.set({ history: run.history, starts: run.starts, highlight: null });
       // restore the optimization grid shown on the chart (previews may have enriched their own grids) and switch to the solid synthesis curve
@@ -877,12 +951,16 @@ function exportExcel() {
   const bytes = resultWorkbook({
     settings: {
       version: VERSION, substrate: substrate(), ambient: ambient(), angle: settings.angle, pol: settings.pol, polLabel: polarizationLabel(settings.pol), dual: dual(), H: materialH(), L: materialL(), lambdaMin: settings.lambdaMin, lambdaMax: settings.lambdaMax, lambdaCenter: lambdaCenter(), points: settings.points, bands: settings.bands, bands2: dual() ? settings.bands2 : null,
-      transition: settings.transition, startMaterial: startMat(), startThickness: settings.startThickness, startMode: settings.startMode, startName: run.startName, maxLayers: settings.maxLayers, maxTOT: settings.maxTOT, targetMerit: settings.targetMerit, thinLayer: settings.thinLayer,
+      transition: settings.transition, startMaterial: startMat(), startThickness: settings.startThickness, startMode: settings.startMode, startName: run.startName,
+      startRole: settings.startMode === 'multi' && run.exploreRanked ? (run.shownStart != null ? 'chosen' : 'winner') : null,   // multi‑start: the design written is the winner's replay, or an explored result chosen from the list
+      maxLayers: settings.maxLayers, maxTOT: settings.maxTOT, targetMerit: settings.targetMerit, thinLayer: settings.thinLayer,
       candidates: settings.candidates, denseCheck: settings.denseCheck, enrichGrid: settings.enrichGrid,
     },
     wavelengths: grid, target, weights, R: res.R, Rs: sp ? sp.Rs : null, Rp: sp ? sp.Rp : null, layers: res.layers,
     result: { F: res.F, maxDev: md, reason: res.reason || 'Intermediate design (synthesis not finished)', stats: res.stats, dense: res.dense, elapsedMs: res.elapsedMs, summary: res.stop ? res.stop.summary : null, verified: res.stop ? res.stop.verified : null, selection: res.selection || null },
     starts: run.exploreResults,
+    // which explored start the written design comes from: a chosen result as explored, or the winner through its replay
+    exported: run.exploreRanked ? (run.shownStart != null ? { index: run.shownStart, how: 'explored' } : run.finished ? { index: run.exploreRanked[0].index, how: 'replay' } : null) : null,
   });
   const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -892,8 +970,9 @@ function exportExcel() {
 }
 
 function showStarts() {
-  const rows = (run.exploreRanked || []).map((r, i) => `<tr class="${i === 0 ? 'best' : ''}"><td>${i === 0 ? '★ ' : ''}${i + 1}. ${r.name}</td><td>${fmt.sci(r.score)}</td><td>${fmt.sci(r.F)}</td><td>${r.Fdense != null ? fmt.sci(r.Fdense) : '—'}</td><td>${r.layers.length}</td><td>${r.opticalThickness.toFixed(0)}</td><td>${(r.elapsedMs / 1000).toFixed(1)}</td><td title="${r.reason}">${r.summary ? r.summary.headline : r.reason}</td></tr>`);
-  $('starts-table').innerHTML = `<caption>Ranked by the score max(F, F<sub>dense</sub>) — the lowest wins and is replayed on the dashboard; every start is synthesized with the same limits and budget.</caption><thead><tr><th>Starting design</th><th>score</th><th>F</th><th>dense F</th><th>layers</th><th>nd, nm</th><th>s</th><th>termination</th></tr></thead><tbody>${rows.join('')}</tbody>`;
+  const shown = run.shownStart;
+  const rows = (run.exploreRanked || []).map((r, i) => `<tr class="${i === 0 ? 'best' : ''}${r.index === shown ? ' shown' : ''}"><td>${i === 0 ? '★ ' : ''}${r.index === shown ? '▸ ' : ''}${i + 1}. ${r.name}</td><td>${fmt.sci(r.score)}</td><td>${fmt.sci(r.F)}</td><td>${r.Fdense != null ? fmt.sci(r.Fdense) : '—'}</td><td>${r.layers.length}</td><td>${r.opticalThickness.toFixed(0)}</td><td>${(r.elapsedMs / 1000).toFixed(1)}</td><td title="${r.reason}">${r.summary ? r.summary.headline : r.reason}</td><td>${r.index === shown ? '<span class="muted">shown</span>' : `<button type="button" class="btn link" data-show="${r.index}" title="Show this result on the dashboard — it becomes the current design for the Layer table and Export Excel">Show</button>`}</td></tr>`);
+  $('starts-table').innerHTML = `<caption>Ranked by the score max(F, F<sub>dense</sub>) — the lowest wins and is replayed on the dashboard; every start is synthesized with the same limits and budget. <b>Show</b> puts the explored result of a start on the dashboard as the current design (charts, Layer table, Export Excel).</caption><thead><tr><th>Starting design</th><th>score</th><th>F</th><th>dense F</th><th>layers</th><th>nd, nm</th><th>s</th><th>termination</th><th></th></tr></thead><tbody>${rows.join('')}</tbody>`;
   $('starts-dialog').showModal();
 }
 
@@ -944,6 +1023,10 @@ function init() {
   $('btn-recipe').addEventListener('click', showRecipe);
   $('recipe-close').addEventListener('click', () => $('recipe-dialog').close());
   $('btn-starts').addEventListener('click', showStarts);
+  $('starts-table').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-show]'); if (!b) return;
+    $('starts-dialog').close(); showExploredStart(Number(b.dataset.show));
+  });
   $('btn-log-all').addEventListener('click', () => { run.logExpanded = !run.logExpanded; updateLogView(); });
   for (const b of $('spectrum-tabs').querySelectorAll('button')) b.addEventListener('click', () => selectTab(b.dataset.tab));
   $('starts-close').addEventListener('click', () => $('starts-dialog').close());

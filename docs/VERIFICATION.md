@@ -48,6 +48,14 @@ Run `npm test` (Node 20+). All checks are automated in `tests/`.
 * Multi‑start: ten starting designs are generated for the mirror problem, the
   ranking is monotone, the winner respects the limits and is never worse than
   the manual start.
+* Explored results (v2.6.0): every `explore-result` carries the complete
+  `done` event of its start and its final needle scan; the ranking fields
+  equal those of the event, the reported F equals an independent evaluation
+  on the start's own (possibly enriched) grid, the dense check, termination
+  summary, self‑check and statistics are present, the design is complete and
+  within the limits, and the ranking is unchanged by the payload — so any
+  explored result can be shown on the dashboard and exported as it was
+  explored.
 * Constrained LM keeps `d ≥ 0` and honours the optical‑thickness bound.
 * Oblique incidence (v2.3): the *Cube splitter 45°* preset (unpolarized 50 %
   inside BK7) and *AR at 45°* (both polarizations) reach their targets within
@@ -138,3 +146,12 @@ conditions, why this design, reported design) agrees with the engine for
 every preset and for multi‑start in Instant, Fast and Live paces, the
 multi‑start replay matching the explored winner; Excel download (with
 Verification and Starts sheets) works; layer and starts tables open.
+v2.6.0: after a multi‑start exploration a click on any finished start (in the
+Multi‑start list or through *Show* in the Ranking dialog) puts its explored
+result on the dashboard — the design on the spectrum, the structure and the
+Layer table, its grid and dense check, its final needle scan, its merit
+history, the tiles and the verdict agree with the explored record; a click
+during the winner's replay stops the replay cleanly; hovering other starts
+restores the chosen design; Export Excel writes the chosen design and names it
+in the Summary and the Starts sheet; Reset clears the selection; stacked
+layout unaffected; no console errors (headless Chromium, 1440 × 900 and 900 px).

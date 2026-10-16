@@ -753,6 +753,19 @@ export function growthSearch(layers, problem, { lamMin, lamMax, maxTOT }) {
 }
 
 /**
+ * The result record of one explored starting design: the ranking fields, the
+ * complete `done` event of its synthesis (the reported design on its own
+ * grid, the dense check, the termination summary and self‑check, the
+ * statistics — everything the interface shows and the export writes for a
+ * finished run) and the final needle scan, so that any explored result can
+ * be shown on the dashboard and exported like the run's own result.
+ */
+export function exploreResult(index, s, done, finalScan = null) {
+  const score = done.dense ? Math.max(done.F, done.dense.F) : done.F;
+  return { index, name: s.name, start: s.start, F: done.F, Fdense: done.dense ? done.dense.F : null, score, layers: done.layers, opticalThickness: done.opticalThickness, reason: done.reason, baseReason: done.stop.base, stopKind: done.stop.kind, summary: done.stop.summary, refinements: done.stop.refinements, elapsedMs: done.elapsedMs, done, finalScan };
+}
+
+/**
  * Multi‑start exploration: run every starting design to completion and
  * yield its result; the final event carries the ranking. `cfg.starts` is a
  * list of { name, start }; defaults to startDesigns(cfg).
@@ -764,10 +777,9 @@ export function* explore(cfg) {
   for (let i = 0; i < starts.length; i++) {
     const s = starts[i];
     yield { type: 'explore-start', index: i, total: starts.length, name: s.name };
-    let done = null;
-    for (const ev of synthesize({ ...cfg, start: { ...s.start, name: s.name } })) if (ev.type === 'done') done = ev;
-    const score = done.dense ? Math.max(done.F, done.dense.F) : done.F;
-    results.push({ index: i, name: s.name, start: s.start, F: done.F, Fdense: done.dense ? done.dense.F : null, score, layers: done.layers, opticalThickness: done.opticalThickness, reason: done.reason, baseReason: done.stop.base, stopKind: done.stop.kind, summary: done.stop.summary, refinements: done.stop.refinements, elapsedMs: done.elapsedMs });
+    let done = null, finalScan = null;
+    for (const ev of synthesize({ ...cfg, start: { ...s.start, name: s.name } })) { if (ev.type === 'done') done = ev; else if (ev.type === 'final-scan') finalScan = ev; }
+    results.push(exploreResult(i, s, done, finalScan));
     yield { type: 'explore-result', ...results[results.length - 1] };
   }
   const ranked = results.slice().sort((a, b) => a.score - b.score);

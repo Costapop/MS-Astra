@@ -1,6 +1,6 @@
 {
   "name": "ms-astra",
-  "version": "2.5.1",
+  "version": "2.6.0",
   "private": true,
   "type": "module",
   "description": "Needle optimization and gradual evolution synthesis of multilayer optical coatings — animated engineering dashboard",

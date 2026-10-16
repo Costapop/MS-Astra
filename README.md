@@ -89,6 +89,14 @@ evidence: [docs/VERIFICATION.md](docs/VERIFICATION.md).
    Excel** to download the target and
    synthesized spectra, the coating parameters, the dense‑grid verification,
    the termination summary and the multi‑start ranking.
+5. Multi‑start: the winner is replayed by default, but any explored result
+   can be chosen instead — click a finished start in the **Multi‑start** list
+   (or *Show* in the **Ranking** dialog) and its result becomes the current
+   design: the coating on the spectrum, the structure and the Layer table,
+   its final needle check, its merit history, the tiles and the verdict (with
+   its rank and the winner for reference). **Export Excel** then writes that
+   design and names it in the Summary and the Starts sheet. Clicking during
+   the replay stops the replay; ★ brings the winner back.
 
 Materials (constant indices): MgF₂ 1.38, SiO₂ 1.46, Al₂O₃ 1.63, HfO₂ 1.95,
 Ta₂O₅ 2.10, TiO₂ 2.45, ZnS 2.35, a‑Si 3.95, K8 1.52, fused quartz 1.46,

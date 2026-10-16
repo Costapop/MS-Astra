@@ -200,7 +200,7 @@
         <h3>Multi‑start</h3><span class="muted" id="multi-label">—</span>
         <button type="button" class="link" id="btn-starts" hidden title="Every explored starting design with its score, merit, layers and termination">Ranking</button>
       </header>
-      <ol class="starts-list" id="explore-list" title="Hover a start to see its spectrum, structure and merit history on the charts"></ol>
+      <ol class="starts-list" id="explore-list" title="Hover a start to see its spectrum, structure and merit history on the charts; after the exploration, click a start to show its result on the dashboard"></ol>
     </article>
 
     <article class="card" id="card-merit">
@@ -210,7 +210,7 @@
           <span class="legend-item" title="Merit history of a finished starting design (hover the Multi‑start list to highlight one)"><i class="swatch ghost"></i>Start</span>
           <span class="legend-item" title="The start being explored"><i class="swatch line-accent"></i>Exploring</span>
           <span class="legend-item" title="The best start so far by its score"><i class="swatch line-good"></i>Leader</span>
-          <span class="legend-item" title="The winner replayed on the dashboard"><i class="swatch current"></i>Replay</span>
+          <span class="legend-item" title="The synthesis on the dashboard: the winner's replay, or the explored result of a start chosen from the Multi‑start list"><i class="swatch current"></i><span id="merit-legend-current">Replay</span></span>
         </div>
       </header>
       <div class="plot"><canvas id="merit"></canvas></div>

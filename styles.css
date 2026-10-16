@@ -290,6 +290,15 @@ input.switch:checked::after { transform: translateX(16px); }
 .starts-list li .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .starts-list li { cursor: default; }
 .starts-list li:hover { color: var(--needle); }
+/* after the exploration every finished start can be clicked: its explored result is shown on the dashboard
+   as the current design (the row gets the current‑design colour and a ▸ marker) */
+.starts-list.selectable li { cursor: pointer; border-radius: 6px; padding-left: 4px; padding-right: 4px; margin: 0 -4px; }
+.starts-list.selectable li:hover { background: color-mix(in srgb, var(--needle) 10%, transparent); }
+.starts-list li.shown { color: var(--series-current); font-weight: 600; background: color-mix(in srgb, var(--series-current) 12%, transparent); }
+.starts-list li.shown .n::before { content: "▸ "; }
+.starts-list li.shown:hover { color: var(--series-current); }
+#starts-table tr.shown td { color: var(--series-current); font-weight: 600; }
+#starts-table .btn.link { padding: 2px 6px; }
 .log li.folded { display: none; }
 .swatch.zone { width: 14px; height: 10px; border-radius: 3px; background: repeating-linear-gradient(135deg, var(--ink-3) 0 2px, transparent 2px 5px); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }

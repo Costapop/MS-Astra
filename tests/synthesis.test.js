@@ -129,6 +129,38 @@ test('multi-start exploration ranks the starting designs and is never worse than
   assert.ok(final.best.layers.length <= 16 && final.best.opticalThickness <= 2600 + 1e-6);
 });
 
+/* ---------------- v2.6.0: any explored result can be shown on the dashboard and exported ---------------- */
+test('every explored result carries the complete done event and the final needle scan of its start', () => {
+  const bands = [{ from: 400, to: 700, R: 0 }];
+  const wl = uniformGrid(400, 700, 31); const s = sampleTarget(bands, wl, 0);
+  const cfg = { wavelengths: wl, target: s.target, weights: s.weights, bands, transition: 0, ns: 1.52, materials: { H: { n: 2.45, m: 'TiO2' }, L: { n: 1.38, m: 'MgF2' } }, start: { material: 'TiO2', thickness: 100 }, maxLayers: 8, maxOpticalThickness: 1200, targetMerit: 1e-9, thinLayer: 1, budgetMs: 5000, dense: { enabled: true } };
+  const results = []; let final = null;
+  for (const ev of explore(cfg)) { if (ev.type === 'explore-result') results.push(ev); if (ev.type === 'explore-done') final = ev; }
+  assert.equal(results.length, startDesigns(cfg, 550).length);
+  for (const r of results) {
+    const d = r.done;
+    assert.ok(d && d.type === 'done', 'the done event travels with the result');
+    // the ranking fields are those of the done event
+    assert.equal(d.F, r.F); assert.equal(d.layers.length, r.layers.length); assert.equal(d.reason, r.reason); assert.equal(d.stop.kind, r.stopKind); assert.equal(d.elapsedMs, r.elapsedMs);
+    assert.equal(r.Fdense, d.dense ? d.dense.F : null);
+    assert.equal(r.score, Math.max(d.F, d.dense.F));
+    // what the dashboard shows and the export writes for this start is self-consistent: the design on its own grid
+    assert.ok(d.grid && d.grid.wavelengths.length >= 31 && d.grid.target.length === d.grid.wavelengths.length && d.R.length === d.grid.wavelengths.length);
+    const R = reflectance(d.layers, d.grid.wavelengths, 1.52);
+    assert.ok(Math.abs(merit(R, d.grid.target, d.grid.weights) - d.F) < 1e-15, 'reported F equals an independent evaluation on the start\'s grid');
+    assert.ok(d.dense && d.dense.R.length === d.dense.wavelengths.length, 'the dense check travels with the result');
+    assert.ok(d.stop.summary && d.stop.summary.facts.length >= 5 && Array.isArray(d.stop.checks), 'termination summary and self-check');
+    assert.ok(d.stats && typeof d.stats.cycles === 'number');
+    assert.ok(d.layers.every((L) => L.d >= 1 - 1e-9) && d.layers.length <= 8 && d.opticalThickness <= 1200 + 1e-6, 'the reported design is complete and within the limits');
+    // the final needle scan of that start (the needle-derivative chart of a shown result)
+    assert.ok(r.finalScan && r.finalScan.type === 'final-scan' && r.finalScan.z.length === r.finalScan.g.length && r.finalScan.verdict && r.finalScan.layers.length === d.layers.length);
+    assert.ok(Math.abs(r.finalScan.F - d.F) < 1e-15);
+  }
+  // the ranking is unchanged by the extra payload
+  assert.ok(final.results.every((r, i) => i === 0 || r.score >= final.results[i - 1].score));
+  assert.ok(final.results.every((r) => r.done === results.find((x) => x.index === r.index).done));
+});
+
 /* ---------------- v2.1.2: termination reasons are consistent with the reported design ---------------- */
 import { PRESETS, bandsFromPreset, materialByKey } from '../src/config.js';
 

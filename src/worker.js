@@ -5,7 +5,7 @@
  * an ordinary synthesis, and the finished designs are ranked by
  * max(F, F_dense).
  */
-import { synthesize, startDesigns } from './synthesis.js';
+import { synthesize, startDesigns, exploreResult } from './synthesis.js';
 
 const STREAMED = new Set(['start', 'stage', 'cycle', 'scan', 'compare', 'needle', 'needle-rejected', 'growth', 'cleanup', 'refined', 'grid', 'dense', 'note', 'final-scan']);
 
@@ -18,9 +18,10 @@ self.onmessage = (e) => {
     for (let i = 0; i < starts.length; i++) {
       const s = starts[i];
       self.postMessage({ type: 'explore-start', index: i, total: starts.length, name: s.name });
-      let done = null, lastFrame = 0;
+      let done = null, finalScan = null, lastFrame = 0;
       for (const ev of synthesize({ ...cfg, start: { ...s.start, name: s.name } })) {
         if (ev.type === 'done') { done = ev; continue; }
+        if (ev.type === 'final-scan') finalScan = ev;
         if (ev.type === 'refine') {
           const now = Date.now();
           if (now - lastFrame < 40) continue;
@@ -30,8 +31,9 @@ self.onmessage = (e) => {
           self.postMessage({ type: 'explore-event', index: i, ev });
         }
       }
-      const score = done.dense ? Math.max(done.F, done.dense.F) : done.F;
-      const r = { index: i, name: s.name, start: s.start, F: done.F, Fdense: done.dense ? done.dense.F : null, score, layers: done.layers, opticalThickness: done.opticalThickness, reason: done.reason, baseReason: done.stop.base, stopKind: done.stop.kind, summary: done.stop.summary, refinements: done.stop.refinements, elapsedMs: done.elapsedMs };
+      // the complete result of the start (its `done` event and final needle scan) travels with the ranking
+      // fields, so the interface can show any explored result on the dashboard and export it
+      const r = exploreResult(i, s, done, finalScan);
       results.push(r);
       self.postMessage({ type: 'explore-result', ...r });
     }
