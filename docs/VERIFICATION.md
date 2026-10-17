@@ -159,4 +159,11 @@ v2.6.1: the merit history legend reads *Replay* again right after Reset (it
 stayed *Shown* until the next exploration had finished), and the Multi‑start
 card label is read whole beside the Ranking button at 1100, 1280, 1440 and
 1920 px («★ replayed», «▸ rank 10 of 10», «★ shown»), the full sentence in
-its tooltip; the 2.6.0 flow above re‑run unchanged.
+its tooltip; the name of the start highlighted from the Multi‑start list is an
+orange pill in the strip above the spectrum plot (checked by pixel count on an
+emulated iPhone in dark mode: the pill is above the frame, not over the curves)
+and is shortened to the frame width; on the emulated phone a tap highlights a
+start, a second tap clears it, a tap on another start moves the highlight and a
+tap after the exploration chooses the start and ends the preview; the desktop
+hover preview is unchanged at 1024 and 1440 px; the 2.6.0 flow above re‑run
+unchanged.

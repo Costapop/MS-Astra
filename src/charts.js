@@ -39,6 +39,19 @@ export const fmt = {
 };
 const SUP = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' };
 function sup(s) { return String(s).split('').map((c) => SUP[c] ?? c).join(''); }
+/** The first of the label variants (longest first) that fits `maxW` in the current font; the last one ellipsized if none does. */
+function fitLabel(ctx, variants, maxW) {
+  for (const v of variants) if (ctx.measureText(v).width <= maxW) return v;
+  let v = variants[variants.length - 1];
+  while (v.length > 1 && ctx.measureText(`${v}…`).width > maxW) v = v.slice(0, -1);
+  return `${v.trimEnd()}…`;
+}
+/** A tinted rounded pill with a one‑line label (the needle chart's banner style); the label is clipped to the pill. */
+function pill(ctx, T, x, y, w, h, color, text) {
+  ctx.fillStyle = color; ctx.globalAlpha = 0.14; ctx.beginPath(); ctx.roundRect(x, y, w, h, h / 2); ctx.fill(); ctx.globalAlpha = 1;
+  ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip(); ctx.fillText(text, x + 8, y + h / 2); ctx.restore();
+}
 
 class Plot {
   constructor(canvas, margin) {
@@ -300,14 +313,6 @@ export class SpectrumChart extends Plot {
           ctx.setLineDash(dash); ctx.stroke(); ctx.globalAlpha = 1; ctx.setLineDash([]);
         }
       }
-      const hl = s.ghostHighlight != null ? s.ghosts[s.ghostHighlight] : null;
-      if (hl) {
-        const t0 = this.targetOf('s');
-        let mean = 0; if (t0 && t0.length) { for (let k = 0; k < t0.length; k++) mean += t0[k]; mean /= t0.length; }
-        const top = mean <= 0.5;
-        ctx.fillStyle = T.ink; ctx.font = `600 11px ${T.font}`; ctx.textAlign = 'left'; ctx.textBaseline = top ? 'top' : 'bottom';
-        ctx.fillText(`${hl.name} · F = ${fmt.sci(hl.F)} · ${hl.layers} layers`, fr.x0 + 8, top ? fr.y0 + 4 : fr.y1 - 4); ctx.font = `11px ${T.font}`;
-      }
     }
     // the area under a curve down to the bottom of the frame
     const area = (wl, arr, fill) => { polyline(wl, arr); ctx.lineTo(xs(wl[wl.length - 1]), ys(y0)); ctx.lineTo(xs(wl[0]), ys(y0)); ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); };
@@ -380,6 +385,18 @@ export class SpectrumChart extends Plot {
       else if (s.R) dot(s.R[i], T['series-current']);
     }
     ctx.restore();
+    // the hovered start of a multi‑start exploration is named in the strip above the plot (outside the frame's clip),
+    // never over the curves or the target bands: an orange pill, the colour of its curve, shortened to the width of
+    // the frame on a narrow chart
+    const hlGhost = s.ghosts && s.ghostHighlight != null ? s.ghosts[s.ghostHighlight] : null;
+    if (hlGhost) {
+      ctx.font = `600 11px ${T.font}`;
+      const bh = 20, bx = fr.x0 + 2, by = fr.y0 - bh - 4, maxW = fr.x1 - bx - 2;
+      const F = `F = ${fmt.sci(hlGhost.F)}`;
+      const label = fitLabel(ctx, [`${hlGhost.name} · ${F} · ${hlGhost.layers} layers`, `${hlGhost.name} · ${F} · ${hlGhost.layers} L`, `${hlGhost.name} · ${F}`, hlGhost.name], maxW - 16);
+      pill(ctx, T, bx, by, Math.min(ctx.measureText(label).width + 16, maxW), bh, T.needle, label);
+      ctx.font = `11px ${T.font}`; ctx.textBaseline = 'middle';
+    }
     // handles
     if (s.editable) {
       const hov = this.hover?.handle, drag = this.drag;
@@ -685,9 +702,14 @@ export class MeritChart extends Plot {
       const hl = s.highlight != null && s.starts[s.highlight] && s.starts[s.highlight].history.length ? s.starts[s.highlight] : null;
       if (hl && fr.y1 - fr.y0 > 80) {
         const last = hl.history[hl.history.length - 1];
-        // bottom‑left corner: the histories start at the top left and end at the bottom right
-        ctx.fillStyle = T.ink; ctx.font = `600 11px ${T.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-        ctx.fillText(`${hl.name} · F = ${fmt.sci(last.F)} · ${hl.history.length - 1} events`, fr.x0 + 6, fr.y1 - 3); ctx.font = `11px ${T.font}`;
+        // bottom‑left corner (the histories start at the top left and end at the bottom right), as an orange pill
+        // shortened to the width of the frame
+        ctx.font = `600 11px ${T.font}`;
+        const bh = 20, bx = fr.x0 + 4, by = fr.y1 - bh - 4, maxW = fr.x1 - bx - 4;
+        const F = `F = ${fmt.sci(last.F)}`, ev = `${hl.history.length - 1} events`;
+        const label = fitLabel(ctx, [`${hl.name} · ${F} · ${ev}`, `${hl.name} · ${F}`, hl.name], maxW - 16);
+        pill(ctx, T, bx, by, Math.min(ctx.measureText(label).width + 16, maxW), bh, T.needle, label);
+        ctx.font = `11px ${T.font}`; ctx.textBaseline = 'middle';
       }
     }
     if (h.length) {

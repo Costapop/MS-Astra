@@ -310,6 +310,7 @@ const run = {
   dense: null, startName: null, exploreResults: [], exploreRanked: null, cfg: null,
   ghosts: [], logExpanded: false, exploreLabel: null,
   starts: [], exploreIndex: null,   // multi‑start: { history, name, running, best, done } per starting design; the start being explored
+  hovered: null,                    // multi‑start: the index of the start highlighted from the list (hover, or a tap on a touch screen)
   shownStart: null,                 // multi‑start: the index of an explored start whose result the user chose to show (null: the winner's replay)
   timer: { running: false, startedAt: 0, accum: 0 },
 };
@@ -414,6 +415,7 @@ function updateCurve(force) {
 function startLabel(html, multi) { $('start-label').innerHTML = `<span class="badge${multi ? ' multi' : ''}" title="${multi ? 'Multi‑start: the starting design shown on the dashboard' : 'The single starting layer'}">${multi ? 'Multi‑start' : 'Single layer'}</span><span title="${html.replace(/"/g, '”')}">${html}</span>`; }
 
 /* ---- Multi‑start card: the starting designs and their status; a merit history per start on the history chart ---- */
+const NO_HOVER = () => typeof matchMedia === 'function' && matchMedia('(hover: none)').matches;   // a touch screen
 const LIST_HINT = 'Hover a start to see its spectrum, structure and merit history on the charts';
 const LIST_HINT_DONE = 'Hover a start to compare it on the charts; click a finished start to show its result on the dashboard — it becomes the current design for the Layer table and Export Excel';
 function renderStartsList(names) {
@@ -421,8 +423,13 @@ function renderStartsList(names) {
   names.forEach((name, i) => {
     const li = document.createElement('li'); li.id = `explore-${i}`; li.className = 'pending';
     li.innerHTML = `<span class="n">${i + 1}. ${name}</span><span class="f">—</span><span class="l"></span>`;
-    li.addEventListener('mouseenter', () => highlightGhost(i)); li.addEventListener('mouseleave', () => highlightGhost(null));
-    li.addEventListener('click', () => { if (run.exploreRanked) showExploredStart(i); });
+    // a pointer that hovers previews the start; a touch screen has no hover (its emulated mouseenter/mouseleave are
+    // ignored — they stick and vanish with the list's own scrolling), so there a tap toggles the preview instead
+    li.addEventListener('mouseenter', () => { if (!NO_HOVER()) highlightGhost(i); }); li.addEventListener('mouseleave', () => { if (!NO_HOVER()) highlightGhost(null); });
+    li.addEventListener('click', () => {
+      if (run.exploreRanked) showExploredStart(i);
+      else if (NO_HOVER()) highlightGhost(run.hovered === i ? null : i);
+    });
     ol.appendChild(li);
   });
 }
@@ -499,6 +506,7 @@ function showExploredStart(index) {
   if (r.finalScan) applyEvent(r.finalScan, true);
   else needle.set({ scan: null, candidate: null, insertion: null, annotations: null, banner: null, stale: false });
   applyEvent(ev, false);
+  highlightGhost(null);   // the hover preview of the clicked row ends: the row is now marked as the current design
   markShownStart();
 }
 function pushStartHistory(F, mark) {
@@ -507,6 +515,8 @@ function pushStartHistory(F, mark) {
 }
 function syncStructure() { structure.set({ layers: view.layers, xmax: view.xmax, highlight: view.highlight }); }
 function highlightGhost(index) {
+  run.hovered = index;
+  for (const li of $('explore-list').children) li.classList.toggle('highlighted', index != null && li.id === `explore-${index}`);
   const list = run.ghosts.filter(Boolean);
   const gh = index != null ? run.ghosts[index] : null;
   spectrum.set({ ghostHighlight: gh ? list.indexOf(gh) : null });

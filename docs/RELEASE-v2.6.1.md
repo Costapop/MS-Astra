@@ -31,10 +31,24 @@ synthesis engine is unchanged.
   explored result) — the label keeps a minimum width so that the button
   wraps under it rather than cutting it, and the full sentence (the number
   of explored starts, the winner, what to click) is in its tooltip.
+- **Hovered start on the charts.** The name of the start highlighted from
+  the Multi‑start list («TiO2 150 nm (manual) · F = … · 19 layers») was
+  written inside the spectrum plot, where on a narrow chart (a phone) it ran
+  over the curves and the target bands and was cut off at the right edge.
+  It is now an orange pill in the strip above the plot — the colour of the
+  highlighted curve, never over the data — shortened to the width of the
+  frame when the chart is narrow (layers, then F are dropped, then the name
+  is ellipsized); the merit history label gets the same pill and shortening
+  in its bottom‑left corner. On a touch screen, where a tap used to leave
+  the browser's emulated hover stuck on a start until the list scrolled, a
+  tap now toggles the highlight of that start (a second tap clears it), the
+  highlighted row is marked, and choosing a start after the exploration ends
+  its preview.
 - Verification: 44 automated tests (unchanged since 2.6.0); headless‑browser
   run of the whole flow — exploration, replay, choosing from the list and from
   the Ranking dialog, choosing during and after the replay, the layer table,
   the export, hover and ★, Reset, oblique incidence with separate Rs/Rp
   targets, enriched grids, budget‑limited starts, the stacked layout — with
-  the legend and the label checked after Reset and at 1100–1920 px, no
-  console errors.
+  the legend and the label checked after Reset and at 1100–1920 px, the
+  hovered‑start pill checked on an emulated phone (tap, second tap, another
+  start, choosing) and at 1024 and 1440 px — no console errors.

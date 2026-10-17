@@ -289,7 +289,8 @@ input.switch:checked::after { transform: translateX(16px); }
 #merit-legend { margin-left: auto; }
 .starts-list li .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .starts-list li { cursor: default; }
-.starts-list li:hover { color: var(--needle); }
+.starts-list li:hover, .starts-list li.highlighted { color: var(--needle); }
+@media (hover: none) { .starts-list li:hover:not(.highlighted) { color: var(--ink-2); } }   /* a tap's sticky :hover means nothing on a touch screen; the tapped start carries .highlighted */
 /* after the exploration every finished start can be clicked: its explored result is shown on the dashboard
    as the current design (the row gets the current‑design colour and a ▸ marker) */
 .starts-list.selectable li { cursor: pointer; border-radius: 6px; padding-left: 4px; padding-right: 4px; margin: 0 -4px; }
