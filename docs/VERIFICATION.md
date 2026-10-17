@@ -155,3 +155,8 @@ during the winner's replay stops the replay cleanly; hovering other starts
 restores the chosen design; Export Excel writes the chosen design and names it
 in the Summary and the Starts sheet; Reset clears the selection; stacked
 layout unaffected; no console errors (headless Chromium, 1440 × 900 and 900 px).
+v2.6.1: the merit history legend reads *Replay* again right after Reset (it
+stayed *Shown* until the next exploration had finished), and the Multi‑start
+card label is read whole beside the Ranking button at 1100, 1280, 1440 and
+1920 px («★ replayed», «▸ rank 10 of 10», «★ shown»), the full sentence in
+its tooltip; the 2.6.0 flow above re‑run unchanged.

@@ -9,7 +9,7 @@ import { synthesize, explore, startDesigns } from './synthesis.js';
 import { SpectrumChart, NeedleChart, StructureChart, MeritChart, fmt } from './charts.js';
 import { resultWorkbook } from './xlsx.js';
 
-export const VERSION = '2.6.0';
+export const VERSION = '2.6.1';
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------------ */
@@ -430,6 +430,7 @@ function renderStartsList(names) {
 function resetMultiCard() {
   const multi = settings.startMode === 'multi';
   $('card-multistart').hidden = !multi; $('rail').classList.toggle('multi', multi); $('btn-starts').hidden = true; $('merit-legend').hidden = !multi;
+  $('merit-legend-current').textContent = 'Replay';   // the history legend describes the next run's replay again, whatever was shown before the reset
   if (!multi) { $('explore-list').innerHTML = ''; $('multi-label').textContent = '—'; return; }
   let names = [];
   try { names = startDesigns(engineConfig(), lambdaCenter()).map((s) => s.name); } catch { names = []; }
@@ -449,13 +450,16 @@ function markShownStart() {
   for (const li of $('explore-list').children) li.classList.toggle('shown', run.shownStart != null && li.id === `explore-${run.shownStart}`);
   if (!ranked.length) return;
   const n = ranked.length, best = ranked[0];
-  if (run.shownStart == null) $('multi-label').textContent = `${n} explored · ★ the winner is replayed`;
+  // the label shares the card header with the Ranking button, so it is kept short enough to be read whole; the full sentence is the tooltip
+  const rank = run.shownStart == null ? null : ranked.findIndex((r) => r.index === run.shownStart) + 1;
+  if (run.shownStart == null) $('multi-label').textContent = '★ replayed';
   else {
-    const rank = ranked.findIndex((r) => r.index === run.shownStart) + 1;
-    $('multi-label').textContent = rank === 1 ? `★ the winner is shown · ${n} explored` : `▸ rank ${rank} of ${n} is shown`;
+    $('multi-label').textContent = rank === 1 ? '★ shown' : `▸ rank ${rank} of ${n}`;
     const li = $(`explore-${run.shownStart}`); if (li) li.scrollIntoView({ block: 'nearest' });
   }
-  $('multi-label').title = run.shownStart == null ? `The winner «${best.name}» is replayed on the dashboard; click any finished start to show its result instead` : `The explored result of «${run.startName}» is on the dashboard (the Layer table and Export Excel describe it); click another start to switch, or ★ for the winner`;
+  $('multi-label').title = run.shownStart == null
+    ? `${n} starts explored; the winner «${best.name}» is replayed on the dashboard — click any finished start to show its result instead`
+    : `The explored result of «${run.startName}» (rank ${rank} of ${n} by the score) is on the dashboard: the Layer table and Export Excel describe it — click another start to switch, or ★ for the winner`;
   $('merit-legend-current').textContent = run.shownStart == null ? 'Replay' : 'Shown';
 }
 const exploredResult = (index) => run.exploreResults.find((r) => r.index === index) || null;
